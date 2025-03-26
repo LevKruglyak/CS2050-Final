@@ -11,14 +11,17 @@ set(CMAKE_CXX_FLAGS "")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELEASE "-Wall -Wextra -O3")
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_SOURCE_DIR "src")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_SOURCE_DIR "src")
+include_directories(${CMAKE_PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}") 
+
+# Dependencies
 include(FetchContent)
 
 # fmt library
 FetchContent_Declare(fmt GIT_REPOSITORY https://github.com/fmtlib/fmt.git GIT_TAG 10.2.1)
 FetchContent_MakeAvailable(fmt)
-
 list(APPEND LIBRARIES fmt)
 
 # Executable
