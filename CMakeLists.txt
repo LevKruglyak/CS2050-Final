@@ -59,29 +59,30 @@ if (BUILD_GUI)
     option(GLFW_BUILD_EXAMPLES OFF)
     option(GLFW_BUILD_TESTS OFF)
     option(GLFW_INSTALL OFF)
-
     FetchContent_Declare(glfw GIT_REPOSITORY https://github.com/glfw/glfw.git GIT_TAG 3.3.9)
     FetchContent_MakeAvailable(glfw)
-
     set(GLFW_INCLUDE_DIR "${glfw_SOURCE_DIR}/include")
     list(APPEND LIBRARIES glfw)
 
     # ImGui
-    FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.91.4)
+    FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.91.9b)
     FetchContent_MakeAvailable(imgui)
-
     file(GLOB IMGUI_SOURCES ${imgui_SOURCE_DIR}/*.cpp)
-    file(GLOB IMGUI_HEADERS ${imgui_SOURCE_DIR}/*.h)
-
     set(IMGUI_BACKENDS_DIR ${imgui_SOURCE_DIR}/backends)
     set(IMGUI_BACKEND_SOURCES ${IMGUI_BACKENDS_DIR}/imgui_impl_glfw.cpp ${IMGUI_BACKENDS_DIR}/imgui_impl_vulkan.cpp)
     set(IMGUI_BACKEND_HEADERS ${IMGUI_BACKENDS_DIR}/imgui_impl_glfw.h ${IMGUI_BACKENDS_DIR}/imgui_impl_vulkan.h)
-    add_library(imgui STATIC ${IMGUI_SOURCES} ${IMGUI_SOURCES} ${IMGUI_BACKEND_HEADERS} ${IMGUI_BACKEND_SOURCES})
+    add_library(imgui STATIC ${IMGUI_SOURCES} ${IMGUI_BACKEND_HEADERS} ${IMGUI_BACKEND_SOURCES})
     target_include_directories(imgui PUBLIC ${IMGUI_BACKENDS_DIR} ${Vulkan_INCLUDE_DIR} ${imgui_SOURCE_DIR} ${GLFW_INCLUDE_DIR})
-
     set_target_properties(imgui PROPERTIES LINKER_LANGUAGE CXX)
-    set(IMGUI_LIBRARIES imgui)
     list(APPEND LIBRARIES imgui)
+
+    # ImPlot
+    FetchContent_Declare(implot GIT_REPOSITORY https://github.com/epezent/implot.git)
+    FetchContent_MakeAvailable(implot)
+    file(GLOB IMPLOT_SOURCES ${implot_SOURCE_DIR}/*.cpp)
+    add_library(implot STATIC ${IMPLOT_SOURCES} ${IMPLOT_HEADERS})
+    target_include_directories(implot PUBLIC ${implot_SOURCE_DIR} ${imgui_SOURCE_DIR})
+    list(APPEND LIBRARIES implot)
 
     # GUI executable
     file(GLOB_RECURSE SOURCES_GUI  "${CMAKE_SOURCE_DIR}/gui/*.cpp")
