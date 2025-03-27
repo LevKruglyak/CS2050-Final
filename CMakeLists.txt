@@ -24,6 +24,15 @@ FetchContent_Declare(fmt GIT_REPOSITORY https://github.com/fmtlib/fmt.git GIT_TA
 FetchContent_MakeAvailable(fmt)
 list(APPEND LIBRARIES fmt)
 
+# HighFive library 
+FetchContent_Declare(highfive GIT_REPOSITORY https://github.com/highfive-devs/highfive.git GIT_TAG v3.0.0-beta2)
+FetchContent_MakeAvailable(highfive)
+list(APPEND LIBRARIES HighFive::HighFive)
+
+# OpenMP library 
+find_package(OpenMP REQUIRED)
+list(APPEND LIBRARIES OpenMP::OpenMP_CXX)
+
 # Executable
 file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/*.cpp")
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES})
