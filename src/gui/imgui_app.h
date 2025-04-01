@@ -1,5 +1,6 @@
 #pragma once
 
+#include "imgui.h"
 #include <cstdlib>
 #include <string>
 #define GLFW_INCLUDE_NONE
@@ -423,6 +424,7 @@ public:
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = nullptr;
     ImPlot::CreateContext();
 
     // Setup Dear ImGui style
