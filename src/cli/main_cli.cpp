@@ -43,6 +43,5 @@ int main(int argc, char *argv[]) {
       printf("updated %d\n", i);
     }
   }
-  // density.resize(sim->resolution * sim->resolution, 0.0);
   return 0;
 }

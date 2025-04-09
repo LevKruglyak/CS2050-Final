@@ -35,9 +35,9 @@ FetchContent_MakeAvailable(glm)
 list(APPEND LIBRARIES glm::glm)
 
 # HighFive library 
-FetchContent_Declare(highfive GIT_REPOSITORY https://github.com/highfive-devs/highfive.git GIT_TAG v3.0.0-beta2)
-FetchContent_MakeAvailable(highfive)
-list(APPEND LIBRARIES HighFive::HighFive)
+# FetchContent_Declare(highfive GIT_REPOSITORY https://github.com/highfive-devs/highfive.git GIT_TAG v3.0.0-beta2)
+# FetchContent_MakeAvailable(highfive)
+# list(APPEND LIBRARIES HighFive::HighFive)
 
 # OpenMP library 
 find_package(OpenMP REQUIRED)
