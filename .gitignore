@@ -3,6 +3,7 @@ build/
 compile_commands.json
 
 *.spv
+*.ini
 
 # OS generated files
 .DS_Store
