@@ -31,36 +31,35 @@ class GravitySimulator {
 
 public:
   GravitySimulator() {
-    std::random_device rd;
-    std::mt19937 rng(rd());
+    // std::random_device rd;
+    // std::mt19937 rng(rd());
+    //
+    // std::uniform_real_distribution<double> angle_sample(0.0,
+    //                                                     glm::tau<double>());
+    // std::uniform_real_distribution<double> radius_sample(0.2, 1.75);
+    //
+    // double black_hole_mass = 1.0;
+    //
+    // std::vector<Particle> particles;
+    // const uint num_particles = 10000;
+    //
+    // particles.push_back(Particle{.m = black_hole_mass});
+    //
+    // double grav_constant = 0.01;
+    // for (uint i = 0; i < num_particles; i++) {
+    //   double radius = radius_sample(rng);
+    //   double angle = angle_sample(rng);
+    //
+    //   double x = cos(angle);
+    //   double y = sin(angle);
+    //   double speed = sqrt(grav_constant * black_hole_mass / radius);
+    //
+    //   particles.push_back(Particle{
+    //       .p = radius * vec2(x, y), .v = speed * vec2(-y, x), .m = 0.00001});
+    // }
+    // sim = std::make_unique<Simulation>(particles);
 
-    std::uniform_real_distribution<double> angle_sample(0.0,
-                                                        glm::tau<double>());
-    std::uniform_real_distribution<double> radius_sample(0.5, 2.0);
-
-    double black_hole_mass = 1.0;
-
-    std::vector<Particle> particles;
-    const uint num_particles = 100000;
-
-    particles.push_back(Particle{.mass = black_hole_mass});
-
-    double grav_constant = 0.01;
-    for (uint i = 0; i < num_particles; i++) {
-      double radius = radius_sample(rng);
-      double angle = angle_sample(rng);
-
-      double x = cos(angle);
-      double y = sin(angle);
-      double speed = sqrt(grav_constant * black_hole_mass / radius);
-
-      particles.push_back(Particle{.pos = radius * vec2(x, y),
-                                   .vel = speed * vec2(-y, x),
-                                   .mass = 0.00001});
-    }
-    sim = std::make_unique<Simulation>(particles);
-
-    // sim = std::make_unique<Simulation>(10.0, 10.0, 10000);
+    sim = std::make_unique<Simulation>(10.0, 10.0, 10000);
     density.resize(sim->resolution * sim->resolution, 0.0);
   }
 
@@ -91,7 +90,7 @@ public:
           ImPlotPoint(node->boundary.max.x, node->boundary.max.y));
 
       ImU32 col = ImPlot::GetCurrentItem()->Color;
-      draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 0.1);
+      draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 1.0f);
     }
 
     for (int i = 0; i < 4; i++) {
@@ -109,8 +108,8 @@ public:
       x_data.reserve(sim->N);
       y_data.reserve(sim->N);
       for (uint i = 0; i < sim->N; i++) {
-        x_data[i] = sim->particles[i].pos.x;
-        y_data[i] = sim->particles[i].pos.y;
+        x_data[i] = sim->ps[i].p.x;
+        y_data[i] = sim->ps[i].p.y;
       }
 
       for (uint i = 0; i < sim->resolution * sim->resolution; i++) {
@@ -151,33 +150,35 @@ public:
       }
 
       ImPlot::EndPlot();
-      ImGui::NextColumn();
-
-      ImGui::Separator();
-      if (ImGui::CollapsingHeader("Viewport Settings")) {
-        ImGui::ColorEdit4("Particle Color", (float *)&particle_color);
-        ImGui::SliderFloat("Particle Radius", &particle_radius, 0.01, 10.0);
-        ImGui::ColorEdit4("Bounds Color", (float *)&bounds_color);
-        ImGui::SliderInt("Barnes-Hut Depth", &bh_depth, 1, 20);
-      }
-
-      ImGui::Separator();
-      ImGui::Text("Number of Particles: %d", (int)sim->N);
-      ImGui::Text("softening: %f", sim->softening);
-      ImGui::Text("dt: %f", sim->dt);
-      ImGui::Text("G: %f", sim->G);
-      ImGui::Text("R: %f", sim->radius);
-      ImGui::Text("total mass: %f", sim->total_mass);
-      ImGui::Text("resolution: %d", sim->resolution);
-
-      ImGui::Separator();
-
-      ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
-                  1000.0f / io.Framerate, io.Framerate);
-      ImGui::Checkbox("Running", &running);
-
-      ImGui::EndColumns();
     }
+    ImGui::NextColumn();
+
+    ImGui::Separator();
+
+    ImGui::Separator();
+    if (ImGui::CollapsingHeader("Viewport Settings")) {
+      ImGui::ColorEdit4("Particle Color", (float *)&particle_color);
+      ImGui::SliderFloat("Particle Radius", &particle_radius, 0.01, 10.0);
+      ImGui::ColorEdit4("Bounds Color", (float *)&bounds_color);
+      ImGui::SliderInt("Barnes-Hut Depth", &bh_depth, 1, 20);
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Number of Particles: %d", (int)sim->N);
+    ImGui::Text("softening: %f", sim->softening);
+    ImGui::Text("dt: %f", sim->dt);
+    ImGui::Text("G: %f", sim->G);
+    ImGui::Text("R: %f", sim->radius);
+    ImGui::Text("total mass: %f", sim->total_mass);
+    ImGui::Text("resolution: %d", sim->resolution);
+
+    ImGui::Separator();
+
+    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+                1000.0f / io.Framerate, io.Framerate);
+    ImGui::Checkbox("Running", &running);
+
+    ImGui::EndColumns();
 
     if (running) {
       sim->update();

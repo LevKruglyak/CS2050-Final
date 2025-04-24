@@ -58,6 +58,6 @@ if (BUILD_GUI)
     # GUI executable
     file(GLOB_RECURSE SOURCES_GUI  "${CMAKE_SOURCE_DIR}/gui/*.cpp")
     imgui_bundle_add_app(${CMAKE_PROJECT_NAME}_app ${SOURCES_CORE} ${SOURCES_GUI})
-    target_include_directories(${CMAKE_PROJECT_NAME}_app PRIVATE ${CMAKE_SOURCE_DIR}/core)
     target_link_libraries(${CMAKE_PROJECT_NAME}_app PRIVATE ${LIBRARIES})
+    target_include_directories(${CMAKE_PROJECT_NAME}_app PRIVATE ${CMAKE_SOURCE_DIR}/core ${glm_SOURCE_DIR} ${legit_profiler_SOURCE_DIR})
 endif()

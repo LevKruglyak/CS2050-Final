@@ -5,8 +5,8 @@
 using vec2 = glm::dvec2;
 
 struct Particle {
-  vec2 pos = vec2();
-  vec2 vel = vec2();
-  vec2 acc = vec2();
-  double mass = 0.0;
+  vec2 p = vec2();
+  vec2 v = vec2();
+  vec2 a = vec2();
+  double m = 0.0;
 };

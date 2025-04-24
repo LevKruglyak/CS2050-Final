@@ -3,7 +3,6 @@
 #include "common.h"
 #include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -60,18 +59,20 @@ struct AABB {
 
 class BHTree {
 public:
-  static constexpr int CAPACITY = 10;
+  static constexpr int CAPACITY = 4;
   std::unique_ptr<BHTree> children[4] = {nullptr, nullptr, nullptr, nullptr};
   AABB boundary;
   std::vector<Particle> bodies;
 
   double totalMass = 0.0;
   vec2 centerOfMass = vec2(0);
+  int numParticles = 0;
 
   BHTree(const AABB &region) : boundary(region) {}
 
   void insert(const Particle &b) {
-    if (!boundary.contains(b.pos))
+    numParticles++;
+    if (!boundary.contains(b.p))
       return;
 
     if (bodies.size() < CAPACITY && children[0] == nullptr) {
@@ -94,8 +95,8 @@ public:
       totalMass = 0.0;
       centerOfMass = vec2(0);
       for (const auto &b : bodies) {
-        totalMass += b.mass;
-        centerOfMass += b.mass * b.pos;
+        totalMass += b.m;
+        centerOfMass += b.m * b.p;
       }
       if (totalMass > 0.0)
         centerOfMass /= totalMass;
@@ -126,7 +127,7 @@ private:
 
   void insertIntoChildren(const Particle &b) {
     for (int i = 0; i < 4; i++) {
-      if (children[i]->boundary.contains(b.pos)) {
+      if (children[i]->boundary.contains(b.p)) {
         children[i]->insert(b);
         break;
       }
