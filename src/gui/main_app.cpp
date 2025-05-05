@@ -78,30 +78,31 @@ public:
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
   }
 
-  inline void DrawBHTreeNode(const FlatBHTree &tree, FlatBHTree::Id nid,
-                             ImDrawList *draw_list, int current_depth,
-                             int maxDepth) {
-    using NodeId = FlatBHTree::Id;
-    constexpr NodeId invalid = FlatBHTree::InvalidId;
-
-    if (nid == invalid || current_depth > maxDepth)
-      return;
-
-    const auto n = tree.nodes_ref()[nid];
-
-    if (n.bodyCnt > 0 || current_depth == maxDepth) {
-      ImVec2 p_min =
-          ImPlot::PlotToPixels(ImPlotPoint(n.bounds.min.x, n.bounds.min.y));
-      ImVec2 p_max =
-          ImPlot::PlotToPixels(ImPlotPoint(n.bounds.max.x, n.bounds.max.y));
-
-      ImU32 col = ImPlot::GetCurrentItem()->Color;
-      draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 1.0f);
-    }
-
-    for (int k = 0; k < 4; ++k)
-      DrawBHTreeNode(tree, n.child[k], draw_list, current_depth + 1, maxDepth);
-  }
+  // inline void DrawBHTreeNode(const FlatBHTree &tree, FlatBHTree::Id nid,
+  //                            ImDrawList *draw_list, int current_depth,
+  //                            int maxDepth) {
+  //   using NodeId = FlatBHTree::Id;
+  //   constexpr NodeId invalid = FlatBHTree::InvalidId;
+  //
+  //   if (nid == invalid || current_depth > maxDepth)
+  //     return;
+  //
+  //   const auto n = tree.nodes_ref()[nid];
+  //
+  //   if (n.bodyCnt > 0 || current_depth == maxDepth) {
+  //     ImVec2 p_min =
+  //         ImPlot::PlotToPixels(ImPlotPoint(n.bounds.min.x, n.bounds.min.y));
+  //     ImVec2 p_max =
+  //         ImPlot::PlotToPixels(ImPlotPoint(n.bounds.max.x, n.bounds.max.y));
+  //
+  //     ImU32 col = ImPlot::GetCurrentItem()->Color;
+  //     draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 1.0f);
+  //   }
+  //
+  //   for (int k = 0; k < 4; ++k)
+  //     DrawBHTreeNode(tree, n.child[k], draw_list, current_depth + 1,
+  //     maxDepth);
+  // }
 
   void update() {
     auto io = ImGui::GetIO();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "bvh.h"
+// #include "bvh.h"
 #include "common.h"
 #include "glm/common.hpp"
 #include <cmath>
@@ -25,7 +25,7 @@ public:
 
   std::vector<Particle> ps;
   std::vector<double> density;
-  FlatBHTree bh;
+  // FlatBHTree bh;
 
   inline vec2 wrap(vec2 v) const { return v - glm::round(v / radius) * radius; }
 
@@ -36,48 +36,48 @@ public:
     return G * diff * inv_r3;
   }
 
-  vec2 bh_accel_id(FlatBHTree::Id nid, const Particle &p) const {
-    const auto &arena = bh.nodes_ref();
-    const auto &node = arena[nid];
-    if (node.mass <= 0.0)
-      return vec2(0);
-
-    const auto invalid = FlatBHTree::InvalidId;
-    bool isLeaf = (node.child[0] == invalid);
-
-    if (isLeaf) {
-      vec2 a(0);
-      for (uint32_t j = 0; j < node.bodyCnt; ++j) {
-        const Particle &other = bh.bodies_ref()[node.firstBody + j];
-
-        vec2 diff = wrap(other.p - p.p);
-        if (diff.x == 0.0 && diff.y == 0.0)
-          continue;
-
-        double dist2 = glm::dot(diff, diff) + softening * softening;
-        double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
-        a += G * diff * inv_r3 * other.m;
-      }
-      return a;
-    }
-
-    double s = node.bounds.size();
-    double d = glm::length(wrap(node.com - p.p));
-
-    if ((s / d) < bh_theta) {
-      vec2 diff = wrap(node.com - p.p);
-      double dist2 = glm::dot(diff, diff) + softening * softening;
-      double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
-      return G * diff * inv_r3 * node.mass;
-    } else {
-      vec2 a(0);
-      for (int k = 0; k < 4; ++k)
-        if (node.child[k] != invalid)
-          a += bh_accel_id(node.child[k], p);
-      return a;
-    }
-  }
-
+  // vec2 bh_accel_id(FlatBHTree::Id nid, const Particle &p) const {
+  //   const auto &arena = bh.nodes_ref();
+  //   const auto &node = arena[nid];
+  //   if (node.mass <= 0.0)
+  //     return vec2(0);
+  //
+  //   const auto invalid = FlatBHTree::InvalidId;
+  //   bool isLeaf = (node.child[0] == invalid);
+  //
+  //   if (isLeaf) {
+  //     vec2 a(0);
+  //     for (uint32_t j = 0; j < node.bodyCnt; ++j) {
+  //       const Particle &other = bh.bodies_ref()[node.firstBody + j];
+  //
+  //       vec2 diff = wrap(other.p - p.p);
+  //       if (diff.x == 0.0 && diff.y == 0.0)
+  //         continue;
+  //
+  //       double dist2 = glm::dot(diff, diff) + softening * softening;
+  //       double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
+  //       a += G * diff * inv_r3 * other.m;
+  //     }
+  //     return a;
+  //   }
+  //
+  //   double s = node.bounds.size();
+  //   double d = glm::length(wrap(node.com - p.p));
+  //
+  //   if ((s / d) < bh_theta) {
+  //     vec2 diff = wrap(node.com - p.p);
+  //     double dist2 = glm::dot(diff, diff) + softening * softening;
+  //     double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
+  //     return G * diff * inv_r3 * node.mass;
+  //   } else {
+  //     vec2 a(0);
+  //     for (int k = 0; k < 4; ++k)
+  //       if (node.child[k] != invalid)
+  //         a += bh_accel_id(node.child[k], p);
+  //     return a;
+  //   }
+  // }
+  //
   Simulation(double radius, double total_mass, uint N)
       : N(N), total_mass(total_mass), radius(radius) {
     std::random_device rd;
@@ -145,8 +145,8 @@ private:
   }
 
   void updateBHTree() {
-    AABB global({-radius / 2, -radius / 2}, {radius / 2, radius / 2});
-    bh.build(ps, global);
+    // AABB global({-radius / 2, -radius / 2}, {radius / 2, radius / 2});
+    // bh.build(ps, global);
   }
 
   void naiveUpdatePositions() {
@@ -170,16 +170,16 @@ private:
   }
 
   void bhUpdatePositions() {
-    updateBHTree();
-
-#pragma omp parallel for schedule(dynamic)
-    for (uint i = 0; i < N; ++i) {
-      vec2 p_next = wrap(ps[i].p + ps[i].v * dt + ps[i].a * (dt * dt * 0.5));
-      vec2 a_next = bh_accel_id(bh.rootId(), ps[i]);
-
-      ps[i].p = p_next;
-      ps[i].v = ps[i].v + (ps[i].a + a_next) * (dt * 0.5);
-      ps[i].a = a_next;
-    }
+    //     updateBHTree();
+    //
+    // #pragma omp parallel for schedule(dynamic)
+    //     for (uint i = 0; i < N; ++i) {
+    //       vec2 p_next = wrap(ps[i].p + ps[i].v * dt + ps[i].a * (dt * dt *
+    //       0.5)); vec2 a_next = bh_accel_id(bh.rootId(), ps[i]);
+    //
+    //       ps[i].p = p_next;
+    //       ps[i].v = ps[i].v + (ps[i].a + a_next) * (dt * 0.5);
+    //       ps[i].a = a_next;
+    //     }
   }
 };

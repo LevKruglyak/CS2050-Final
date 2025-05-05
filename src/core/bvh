@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <gch/small_vector.hpp>
 #include <limits>
 #include <span>
 
@@ -72,7 +71,7 @@ class FlatBHTree {
       NodeArena<Node>::Id child[4]{
           NodeArena<Node>::invalid, NodeArena<Node>::invalid,
           NodeArena<Node>::invalid, NodeArena<Node>::invalid};
-      gch::small_vector<Particle, LEAF_CAP> particles;
+      std::vector<Particle> particles;
     };
   };
 

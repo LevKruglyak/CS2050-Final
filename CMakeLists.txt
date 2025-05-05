@@ -34,23 +34,29 @@ FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git GIT_TA
 FetchContent_MakeAvailable(glm)
 list(APPEND LIBRARIES glm::glm)
 
-# small_vec library
-FetchContent_Declare(small_vec GIT_REPOSITORY https://github.com/gharveymn/small_vector.git GIT_TAG v0.10.2)
-FetchContent_MakeAvailable(small_vec)
-list(APPEND LIBRARIES gch::small_vector)
-
-# mimalloc library
-FetchContent_Declare(mimalloc GIT_REPOSITORY https://github.com/microsoft/mimalloc.git GIT_TAG v3.0.3)
-FetchContent_MakeAvailable(mimalloc)
-list(APPEND LIBRARIES mimalloc)
+# # small_vec library
+# FetchContent_Declare(small_vec GIT_REPOSITORY https://github.com/gharveymn/small_vector.git GIT_TAG v0.10.2)
+# FetchContent_MakeAvailable(small_vec)
+# list(APPEND LIBRARIES gch::small_vector)
 
 # OpenMP library 
 find_package(OpenMP REQUIRED)
 list(APPEND LIBRARIES OpenMP::OpenMP_CXX)
 
+# MPI library
+find_package(MPI REQUIRED)
+list(APPEND LIBRARIES MPI::MPI_CXX)
+
+# FFTW library
+FetchContent_Declare(findfftw GIT_REPOSITORY https://github.com/egpbos/findFFTW.git GIT_TAG master)
+FetchContent_MakeAvailable(findfftw)
+list(APPEND CMAKE_MODULE_PATH "${findfftw_SOURCE_DIR}")
+find_package(FFTW REQUIRED COMPONENTS DOUBLE_OPENMP_LIB DOUBLE_MPI_LIB)
+
 # CLI executable
 file(GLOB_RECURSE SOURCES_CORE "${CMAKE_SOURCE_DIR}/core/*.cpp")
 file(GLOB_RECURSE SOURCES_CLI "${CMAKE_SOURCE_DIR}/cli/*.cpp")
+
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES_CORE} ${SOURCES_CLI})
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(${CMAKE_PROJECT_NAME} ${LIBRARIES})
