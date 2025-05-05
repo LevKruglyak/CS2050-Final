@@ -13,7 +13,7 @@ message(STATUS "Build app: ${BUILD_GUI}")
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 set(CMAKE_CXX_FLAGS "")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -fsanitize=address")
+set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "-Wall -O3")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,11 @@ list(APPEND LIBRARIES glm::glm)
 FetchContent_Declare(small_vec GIT_REPOSITORY https://github.com/gharveymn/small_vector.git GIT_TAG v0.10.2)
 FetchContent_MakeAvailable(small_vec)
 list(APPEND LIBRARIES gch::small_vector)
+
+# mimalloc library
+FetchContent_Declare(mimalloc GIT_REPOSITORY https://github.com/microsoft/mimalloc.git GIT_TAG v3.0.3)
+FetchContent_MakeAvailable(mimalloc)
+list(APPEND LIBRARIES mimalloc)
 
 # OpenMP library 
 find_package(OpenMP REQUIRED)

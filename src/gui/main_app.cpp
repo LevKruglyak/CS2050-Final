@@ -59,7 +59,7 @@ public:
     // }
     // sim = std::make_unique<Simulation>(particles);
 
-    sim = std::make_unique<Simulation>(10.0, 10.0, 10000);
+    sim = std::make_unique<Simulation>(10.0, 10.0, 500);
     density.resize(sim->resolution * sim->resolution, 0.0);
   }
 
@@ -78,24 +78,29 @@ public:
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
   }
 
-  void DrawBHTreeNode(const BHTree *node, ImDrawList *draw_list,
-                      int current_depth) {
-    if (!node || current_depth > bh_depth)
+  inline void DrawBHTreeNode(const FlatBHTree &tree, FlatBHTree::Id nid,
+                             ImDrawList *draw_list, int current_depth,
+                             int maxDepth) {
+    using NodeId = FlatBHTree::Id;
+    constexpr NodeId invalid = FlatBHTree::InvalidId;
+
+    if (nid == invalid || current_depth > maxDepth)
       return;
 
-    if (node->bodies.size() > 0 || current_depth == bh_depth) {
-      ImVec2 p_min = ImPlot::PlotToPixels(
-          ImPlotPoint(node->boundary.min.x, node->boundary.min.y));
-      ImVec2 p_max = ImPlot::PlotToPixels(
-          ImPlotPoint(node->boundary.max.x, node->boundary.max.y));
+    const auto n = tree.nodes_ref()[nid];
+
+    if (n.bodyCnt > 0 || current_depth == maxDepth) {
+      ImVec2 p_min =
+          ImPlot::PlotToPixels(ImPlotPoint(n.bounds.min.x, n.bounds.min.y));
+      ImVec2 p_max =
+          ImPlot::PlotToPixels(ImPlotPoint(n.bounds.max.x, n.bounds.max.y));
 
       ImU32 col = ImPlot::GetCurrentItem()->Color;
       draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 1.0f);
     }
 
-    for (int i = 0; i < 4; i++) {
-      DrawBHTreeNode(node->children[i].get(), draw_list, current_depth + 1);
-    }
+    for (int k = 0; k < 4; ++k)
+      DrawBHTreeNode(tree, n.child[k], draw_list, current_depth + 1, maxDepth);
   }
 
   void update() {
@@ -133,11 +138,11 @@ public:
       ImPlot::SetNextLineStyle(particle_color);
       ImPlot::PlotScatter("particles", x_data.data(), y_data.data(), sim->N);
 
-      if (ImPlot::BeginItem("bh tree", 0)) {
-        ImDrawList *draw_list = ImPlot::GetPlotDrawList();
-        DrawBHTreeNode(sim->bh.get(), draw_list, 0);
-        ImPlot::EndItem();
-      }
+      // if (ImPlot::BeginItem("bh tree", 0)) {
+      //   ImDrawList *draw_list = ImPlot::GetPlotDrawList();
+      //   DrawBHTreeNode(sim->bh, 0, draw_list, 0, bh_depth);
+      //   ImPlot::EndItem();
+      // }
 
       ImPlot::SetNextFillStyle(bounds_color);
       if (ImPlot::BeginItem("bounds", 0)) {

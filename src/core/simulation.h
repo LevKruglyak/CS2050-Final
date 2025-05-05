@@ -25,51 +25,56 @@ public:
 
   std::vector<Particle> ps;
   std::vector<double> density;
-  std::unique_ptr<BHTree> bh;
+  FlatBHTree bh;
 
   inline vec2 wrap(vec2 v) const { return v - glm::round(v / radius) * radius; }
 
   inline vec2 accel(vec2 target, vec2 position) const {
     vec2 diff = wrap(target - position);
-
     double dist2 = glm::dot(diff, diff) + softening * softening;
     double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
-
     return G * diff * inv_r3;
   }
 
-  vec2 bh_accel(const BHTree *node, const Particle &p) const {
-    if (node->totalMass <= 0.0)
+  vec2 bh_accel_id(FlatBHTree::Id nid, const Particle &p) const {
+    const auto &arena = bh.nodes_ref();
+    const auto &node = arena[nid];
+    if (node.mass <= 0.0)
       return vec2(0);
 
-    vec2 a(0);
-    if (!node->children[0] && node->bodies.size() > 0) {
-      for (auto &leaf : node->bodies) {
-        if (&leaf == &p)
+    const auto invalid = FlatBHTree::InvalidId;
+    bool isLeaf = (node.child[0] == invalid);
+
+    if (isLeaf) {
+      vec2 a(0);
+      for (uint32_t j = 0; j < node.bodyCnt; ++j) {
+        const Particle &other = bh.bodies_ref()[node.firstBody + j];
+
+        vec2 diff = wrap(other.p - p.p);
+        if (diff.x == 0.0 && diff.y == 0.0)
           continue;
 
-        vec2 diff = wrap(leaf.p - p.p);
         double dist2 = glm::dot(diff, diff) + softening * softening;
         double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
-        a += G * diff * inv_r3 * leaf.m;
+        a += G * diff * inv_r3 * other.m;
       }
       return a;
+    }
+
+    double s = node.bounds.size();
+    double d = glm::length(wrap(node.com - p.p));
+
+    if ((s / d) < bh_theta) {
+      vec2 diff = wrap(node.com - p.p);
+      double dist2 = glm::dot(diff, diff) + softening * softening;
+      double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
+      return G * diff * inv_r3 * node.mass;
     } else {
-      double s = node->boundary.size();
-      double d = glm::length(wrap(node->centerOfMass - p.p));
-      if ((s / d) < bh_theta) {
-        vec2 diff = wrap(node->centerOfMass - p.p);
-        double dist2 = glm::dot(diff, diff) + softening * softening;
-        double inv_r3 = 1.0 / (dist2 * std::sqrt(dist2));
-        return G * diff * inv_r3 * node->totalMass;
-      } else {
-        for (auto &child : node->children) {
-          if (child) {
-            a += bh_accel(child.get(), p);
-          }
-        }
-        return a;
-      }
+      vec2 a(0);
+      for (int k = 0; k < 4; ++k)
+        if (node.child[k] != invalid)
+          a += bh_accel_id(node.child[k], p);
+      return a;
     }
   }
 
@@ -79,122 +84,102 @@ public:
     std::mt19937 rng(rd());
     std::uniform_real_distribution<double> sample(-radius / 2, radius / 2);
 
-    for (uint i = 0; i < N; i++) {
-      vec2 x = vec2(sample(rng), sample(rng));
+    ps.reserve(N);
+    for (uint i = 0; i < N; ++i)
+      ps.push_back(Particle{vec2(sample(rng), sample(rng)), vec2(0.0),
+                            vec2(0.0), total_mass / N});
 
-      ps.push_back(Particle{.p = x, .m = total_mass / N});
-    }
-
-    resolution = std::ceil(sqrt((double)N / particles_per_cell));
-    density.resize(resolution * resolution, 0);
-    total_mass = 0.0;
-    for (const auto &particle : ps) {
-      total_mass += particle.m;
-    }
-    updateDensity();
-    updateBHTree();
+    finish_init();
   }
 
-  Simulation(std::vector<Particle> particles) : ps(particles) {
-    N = particles.size();
-    resolution = std::ceil(sqrt((double)N / particles_per_cell));
-    density.resize(resolution * resolution, 0);
+  explicit Simulation(std::vector<Particle> particles)
+      : ps(std::move(particles)) {
+    N = ps.size();
     total_mass = 0.0;
-    for (const auto &particle : particles) {
-      total_mass += particle.m;
-    }
+    for (const auto &b : ps)
+      total_mass += b.m;
+    finish_init();
+  }
+
+  void update() {
+    bhUpdatePositions();
+    updateDensity();
+  }
+
+private:
+  void finish_init() {
+    resolution = static_cast<int>(
+        std::ceil(std::sqrt(static_cast<double>(N) / particles_per_cell)));
+    density.resize(resolution * resolution, 0);
     updateDensity();
     updateBHTree();
   }
 
   void updateDensity() {
-    // Update density
-    std::fill(density.begin(), density.end(), 0.0f);
-    for (size_t i = 0; i < ps.size(); i++) {
-      float dX = (ps[i].p.x / radius + 0.5) * resolution;
-      float dY = (ps[i].p.y / radius + 0.5) * resolution;
-      int gridX = (int)dX;
-      int gridY = (int)dY;
-      dX -= gridX;
-      dY -= gridY;
+    std::fill(density.begin(), density.end(), 0.0);
 
-      auto wrapIndex = [&](int i) {
-        i = i % resolution;
-        if (i < 0)
-          i += resolution;
-        return i;
+    for (const auto &part : ps) {
+      double dX = (part.p.x / radius + 0.5) * resolution;
+      double dY = (part.p.y / radius + 0.5) * resolution;
+      int gx = static_cast<int>(dX), gy = static_cast<int>(dY);
+      dX -= gx;
+      dY -= gy;
+
+      auto wrapIdx = [this](int i) {
+        i %= resolution;
+        return (i < 0) ? i + resolution : i;
       };
 
-      int nX = wrapIndex(dX < 0.5 ? gridX - 1 : gridX + 1);
-      int nY = wrapIndex(dY < 0.5 ? gridY - 1 : gridY + 1);
+      int nx = wrapIdx(dX < 0.5 ? gx - 1 : gx + 1);
+      int ny = wrapIdx(dY < 0.5 ? gy - 1 : gy + 1);
 
-      float oX = abs(0.5f - dX);
-      float oY = abs(0.5f - dY);
-      float weight00 = (1.0f - oX) * (1.0f - oY);
-      float weight10 = oX * (1.0f - oY);
-      float weight01 = (1.0f - oX) * oY;
-      float weight11 = oX * oY;
+      double oX = std::abs(0.5 - dX), oY = std::abs(0.5 - dY);
+      double w00 = (1 - oX) * (1 - oY), w10 = oX * (1 - oY),
+             w01 = (1 - oX) * oY, w11 = oX * oY;
 
-      density[gridY * resolution + gridX] += weight00 * ps[i].m;
-      density[gridY * resolution + nX] += weight10 * ps[i].m;
-      density[nY * resolution + gridX] += weight01 * ps[i].m;
-      density[nY * resolution + nX] += weight11 * ps[i].m;
-    }
-  }
-
-  void naiveUpdatePositions() {
-#pragma omp parallel for schedule(dynamic)
-    for (uint i = 0; i < N; i++) {
-      vec2 p = ps[i].p;
-      vec2 v = ps[i].v;
-      vec2 a = ps[i].a;
-
-      // Update position
-      vec2 np = p + v * dt + a * (dt * dt * 0.5);
-
-      // Calculate forces
-      vec2 na = vec2();
-      // #pragma omp parallel for reduction(+ : na)
-      for (uint j = 0; j < N; j++) {
-        na += (i != j) ? ps[j].m * accel(ps[j].p, np) : vec2();
-      }
-
-      ps[i] = Particle{
-          .p = wrap(np),
-          .v = v + (a + na) * (dt * 0.5),
-          .a = na,
-          .m = ps[i].m,
-      };
+      density[gy * resolution + gx] += w00 * part.m;
+      density[gy * resolution + nx] += w10 * part.m;
+      density[ny * resolution + gx] += w01 * part.m;
+      density[ny * resolution + nx] += w11 * part.m;
     }
   }
 
   void updateBHTree() {
-    AABB globalRegion(vec2(-radius / 2, -radius / 2),
-                      vec2(radius / 2, radius / 2));
+    AABB global({-radius / 2, -radius / 2}, {radius / 2, radius / 2});
+    bh.build(ps, global);
+  }
 
-    bh = std::make_unique<BHTree>(globalRegion);
-    for (auto &b : ps) {
-      bh->insert(b);
+  void naiveUpdatePositions() {
+#pragma omp parallel for schedule(dynamic)
+    for (uint i = 0; i < N; ++i) {
+      vec2 p = ps[i].p;
+      vec2 v = ps[i].v;
+      vec2 a = ps[i].a;
+
+      vec2 np = wrap(p + v * dt + a * (dt * dt * 0.5));
+
+      vec2 na(0);
+      for (uint j = 0; j < N; ++j)
+        if (i != j)
+          na += ps[j].m * accel(ps[j].p, np);
+
+      ps[i].p = np;
+      ps[i].v = v + (a + na) * (dt * 0.5);
+      ps[i].a = na;
     }
-    bh->computeMassDistribution();
   }
 
   void bhUpdatePositions() {
     updateBHTree();
 
 #pragma omp parallel for schedule(dynamic)
-    for (uint i = 0; i < N; i++) {
-      vec2 p = wrap(ps[i].p + ps[i].v * dt + ps[i].a * (dt * dt * 0.5));
-      vec2 a = bh_accel(bh.get(), ps[i]);
+    for (uint i = 0; i < N; ++i) {
+      vec2 p_next = wrap(ps[i].p + ps[i].v * dt + ps[i].a * (dt * dt * 0.5));
+      vec2 a_next = bh_accel_id(bh.rootId(), ps[i]);
 
-      ps[i].p = p;
-      ps[i].v = ps[i].v + (ps[i].a + a) * (dt * 0.5);
-      ps[i].a = a;
+      ps[i].p = p_next;
+      ps[i].v = ps[i].v + (ps[i].a + a_next) * (dt * 0.5);
+      ps[i].a = a_next;
     }
-  }
-
-  void update() {
-    bhUpdatePositions();
-    updateDensity();
   }
 };

@@ -3,134 +3,186 @@
 #include "common.h"
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <gch/small_vector.hpp>
 #include <limits>
-#include <memory>
-#include <vector>
+#include <span>
+
+template <class T> class NodeArena {
+public:
+  using Id = uint32_t;
+  static constexpr Id invalid = std::numeric_limits<Id>::max();
+
+  explicit NodeArena(std::size_t prealloc = 0) { items.reserve(prealloc); }
+
+  [[nodiscard]] Id push(const T &object) {
+    Id id = static_cast<Id>(items.size());
+    items.push_back(object);
+    return id;
+  }
+
+  T &operator[](Id i) { return items[i]; }
+  const T &operator[](Id i) const { return items[i]; }
+
+  void reset() noexcept { items.clear(); }
+
+  std::size_t size() const noexcept { return items.size(); }
+  std::size_t capacity() const noexcept { return items.capacity(); }
+
+private:
+  std::vector<T> items;
+};
 
 struct AABB {
-  vec2 min;
-  vec2 max;
+  vec2 min{std::numeric_limits<double>::max()};
+  vec2 max{std::numeric_limits<double>::lowest()};
 
-  AABB() {
-    min = vec2(std::numeric_limits<double>::max());
-    max = vec2(std::numeric_limits<double>::lowest());
-  }
-
+  AABB() = default;
   AABB(const vec2 &mn, const vec2 &mx) : min(mn), max(mx) {}
 
-  bool contains(const vec2 &p) const {
-    return (p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y);
+  double size() const { return std::max(max.x - min.x, max.y - min.y); }
+
+  [[nodiscard]] bool contains(const vec2 &p) const {
+    return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
   }
-
-  double size() const {
-    double dx = max.x - min.x;
-    double dy = max.y - min.y;
-    return std::max(dx, dy);
-  }
-
-  AABB quadrant(int index) const {
-    vec2 center = 0.5 * (min + max);
-    AABB box;
-
-    switch (index) {
+  [[nodiscard]] AABB quadrant(int i) const {
+    vec2 c = 0.5 * (min + max);
+    switch (i) {
     case 0:
-      box.min = vec2(min.x, center.y);
-      box.max = vec2(center.x, max.y);
-      break;
+      return {{min.x, c.y}, {c.x, max.y}};
     case 1:
-      box.min = vec2(center.x, center.y);
-      box.max = vec2(max.x, max.y);
-      break;
+      return {{c.x, c.y}, {max.x, max.y}};
     case 2:
-      box.min = vec2(min.x, min.y);
-      box.max = vec2(center.x, center.y);
-      break;
-    case 3:
-      box.min = vec2(center.x, min.y);
-      box.max = vec2(max.x, center.y);
-      break;
+      return {{min.x, min.y}, {c.x, c.y}};
     default:
-      box = *this;
-      break;
+      return {{c.x, min.y}, {max.x, c.y}};
     }
-    return box;
   }
 };
 
-class BHTree {
+class FlatBHTree {
+  struct Node {
+    AABB bounds{};
+    vec2 com{0};
+    double mass{0};
+
+    Node(AABB bounds, uint32_t bodies) : bounds(bounds), bodyCnt(bodies) {}
+
+    union {
+      NodeArena<Node>::Id child[4]{
+          NodeArena<Node>::invalid, NodeArena<Node>::invalid,
+          NodeArena<Node>::invalid, NodeArena<Node>::invalid};
+      gch::small_vector<Particle, LEAF_CAP> particles;
+    };
+  };
+
 public:
-  static constexpr int CAPACITY = 4;
-  std::unique_ptr<BHTree> children[4] = {nullptr, nullptr, nullptr, nullptr};
-  AABB boundary;
-  std::vector<Particle> bodies;
+  using Id = NodeArena<Node>::Id;
+  static constexpr Id InvalidId = NodeArena<Node>::invalid;
+  static constexpr int LEAF_CAP = 4;
 
-  double totalMass = 0.0;
-  vec2 centerOfMass = vec2(0);
-  int numParticles = 0;
-
-  BHTree(const AABB &region) : boundary(region) {}
-
-  void insert(const Particle &b) {
-    numParticles++;
-    if (!boundary.contains(b.p))
-      return;
-
-    if (bodies.size() < CAPACITY && children[0] == nullptr) {
-      bodies.push_back(b);
-      return;
-    }
-
-    if (!children[0]) {
-      subdivide();
-      for (const auto &existingParticle : bodies)
-        insertIntoChildren(existingParticle);
-      bodies.clear();
-    }
-
-    insertIntoChildren(b);
+  explicit FlatBHTree(std::size_t nodeReserve = 0, std::size_t bodyReserve = 0)
+      : nodes(nodeReserve) {
+    bodies.reserve(bodyReserve);
   }
 
-  void computeMassDistribution() {
-    if (!children[0]) {
-      totalMass = 0.0;
-      centerOfMass = vec2(0);
-      for (const auto &b : bodies) {
-        totalMass += b.m;
-        centerOfMass += b.m * b.p;
-      }
-      if (totalMass > 0.0)
-        centerOfMass /= totalMass;
-    } else {
-      // Internal node
-      totalMass = 0.0;
-      centerOfMass = vec2(0);
+  void build(std::span<const Particle> particles, const AABB &rootBox) {
+    bodies.clear();
+    bodies.insert(bodies.end(), particles.begin(), particles.end());
 
-      for (auto &child : children) {
-        if (child) {
-          child->computeMassDistribution();
-          totalMass += child->totalMass;
-          centerOfMass += child->totalMass * child->centerOfMass;
-        }
-      }
-      if (totalMass > 0.0)
-        centerOfMass /= totalMass;
-    }
+    nodes.reset();
+    root = nodes.push(Node(rootBox, bodies.size()));
+    printf("created root %d\n", root);
+
+    subdivideRecursive(root);
+    // accumulateMasses();
   }
+
+  auto rootId() const noexcept { return root; }
+  const NodeArena<Node> &nodes_ref() const noexcept { return nodes; }
+  const std::vector<Particle> &bodies_ref() const noexcept { return bodies; }
 
 private:
-  void subdivide() {
-    for (int i = 0; i < 4; i++) {
-      AABB childRegion = boundary.quadrant(i);
-      children[i] = std::make_unique<BHTree>(childRegion);
+  NodeArena<Node> nodes;
+  std::vector<Particle> bodies;
+  NodeArena<Node>::Id root{NodeArena<Node>::invalid};
+
+  void subdivideRecursive(Id nid) {
+    Node &parent = nodes[nid];
+    if (parent.bodyCnt <= LEAF_CAP)
+      return;
+
+    Id cid[4];
+    const AABB box = parent.bounds;
+
+    for (int k = 0; k < 4; ++k) {
+      cid[k] = nodes.push(Node(box.quadrant(k), 0));
     }
+
+    // Set children
+    Node &p = nodes[nid];
+    for (int k = 0; k < 4; ++k)
+      p.child[k] = cid[k];
+
+    const uint32_t begin = p.firstBody;
+    const uint32_t end = begin + p.bodyCnt;
+
+    for (uint32_t i = begin; i < end;) {
+      Particle &part = bodies[i];
+
+      int q = -1;
+      for (int k = 0; k < 4; ++k)
+        if (nodes[cid[k]].bounds.contains(part.p)) {
+          q = k;
+          break;
+        }
+
+      if (q < 0) {
+        ++i;
+        continue;
+      }
+
+      Node &c = nodes[cid[q]];
+      std::swap(part, bodies[begin + c.bodyCnt]);
+      ++c.bodyCnt;
+
+      if (i < begin + c.bodyCnt)
+        ++i;
+    }
+
+    uint32_t offset = begin;
+    for (int k = 0; k < 4; ++k) {
+      Node &c = nodes[cid[k]];
+      c.firstBody = offset;
+      offset += c.bodyCnt;
+
+      if (c.bodyCnt > LEAF_CAP)
+        subdivideRecursive(cid[k]);
+    }
+
+    p.bodyCnt = 0;
   }
 
-  void insertIntoChildren(const Particle &b) {
-    for (int i = 0; i < 4; i++) {
-      if (children[i]->boundary.contains(b.p)) {
-        children[i]->insert(b);
-        break;
+  void accumulateMasses() {
+    for (int i = static_cast<int>(nodes.size()) - 1; i >= 0; --i) {
+      Node &n = nodes[static_cast<NodeArena<Node>::Id>(i)];
+
+      if (n.child[0] == NodeArena<Node>::invalid) {
+        for (uint32_t j = 0; j < n.bodyCnt; ++j) {
+          const Particle &b = bodies[n.firstBody + j];
+          n.mass += b.m;
+          n.com += b.m * b.p;
+        }
+      } else {
+        for (int k = 0; k < 4; k++)
+          if (n.child[k] != NodeArena<Node>::invalid) {
+            const Node &c = nodes[n.child[k]];
+            n.mass += c.mass;
+            n.com += c.mass * c.com;
+          }
       }
+      if (n.mass)
+        n.com /= n.mass;
     }
   }
 };
