@@ -11,7 +11,9 @@
 #include "common.h"
 
 class Simulation {
-  inline vec2 wrap(vec2 v) { return v - glm::round(v / (double)params.RADIUS) * (double)params.RADIUS; };
+  inline vec2 wrap(vec2 v) {
+    return v - glm::round(v / (double)params.RADIUS) * (double)params.RADIUS;
+  };
 
   MPI_Datatype get_mpi_particle_type() const {
     static MPI_Datatype mpi_particle_type;
@@ -34,7 +36,8 @@ class Simulation {
     return mpi_particle_type;
   }
 
-  std::vector<Particle> generate_local_particles(int lxstart, int lxres, std::function<double(double, double)> frho,
+  std::vector<Particle> generate_local_particles(int lxstart, int lxres,
+                                                 std::function<double(double, double)> frho,
                                                  int rank) {
     int num_cells = lxres * params.RESOLUTION;
     std::vector<double> rho_values(num_cells, 0.0);
@@ -100,8 +103,9 @@ class Simulation {
             double x = x_min + dx * u(rng);
             double y = y_min + dy * u(rng);
 
-            thread_particles[tid].emplace_back(Particle{wrap(vec2(x - params.RADIUS / 2, y - params.RADIUS / 2)),
-                                                        vec2(0.0), vec2(0.0), particle_mass});
+            thread_particles[tid].emplace_back(
+                Particle{wrap(vec2(x - params.RADIUS / 2, y - params.RADIUS / 2)), vec2(0.0),
+                         vec2(0.0), particle_mass});
           }
         }
       }
@@ -217,7 +221,7 @@ class Simulation {
 
     for (int i = lx0; i < lNx; ++i) {
       for (int j = 0; j < Ny; ++j) {
-        lrho[i * lNx + j] = ceil(sin(0.05 * i) + cos(0.05 * j) - 0.02);
+        lrho[i * lNx + j] = ceil(sin(0.05 * i) + cos(0.05 * j) - 0.2);
       }
     }
     solve_poisson();
@@ -425,12 +429,14 @@ class Simulation {
 
       if (send_counts[r] > 0) {
         requests.emplace_back();
-        MPI_Isend(send_buffers[r].data(), send_counts[r], mpi_particle_type, r, 42, comm, &requests.back());
+        MPI_Isend(send_buffers[r].data(), send_counts[r], mpi_particle_type, r, 42, comm,
+                  &requests.back());
       }
 
       if (recv_counts[r] > 0) {
         requests.emplace_back();
-        MPI_Irecv(recv_buffers[r].data(), recv_counts[r], mpi_particle_type, r, 42, comm, &requests.back());
+        MPI_Irecv(recv_buffers[r].data(), recv_counts[r], mpi_particle_type, r, 42, comm,
+                  &requests.back());
       }
     }
 
@@ -449,8 +455,10 @@ class Simulation {
     std::vector<double> send_right(params.RESOLUTION, 0.0);
 
     for (const auto& p : particles) {
-      double fx = std::fmod((p.p.x + params.RADIUS * 0.5) / dx, static_cast<double>(params.RESOLUTION));
-      double fy = std::fmod((p.p.y + params.RADIUS * 0.5) / dy, static_cast<double>(params.RESOLUTION));
+      double fx =
+          std::fmod((p.p.x + params.RADIUS * 0.5) / dx, static_cast<double>(params.RESOLUTION));
+      double fy =
+          std::fmod((p.p.y + params.RADIUS * 0.5) / dy, static_cast<double>(params.RESOLUTION));
       if (fx < 0)
         fx += params.RESOLUTION;
       if (fy < 0)
@@ -496,25 +504,26 @@ class Simulation {
     int left = (rank == 0 ? size - 1 : rank - 1);
     int right = (rank == size - 1 ? 0 : rank + 1);
 
-    MPI_Sendrecv(send_left.data(), params.RESOLUTION, MPI_DOUBLE, left, 0, recv_right.data(), params.RESOLUTION,
-                 MPI_DOUBLE, right, 0, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_left.data(), params.RESOLUTION, MPI_DOUBLE, left, 0, recv_right.data(),
+                 params.RESOLUTION, MPI_DOUBLE, right, 0, comm, MPI_STATUS_IGNORE);
 
-    MPI_Sendrecv(send_right.data(), params.RESOLUTION, MPI_DOUBLE, right, 1, recv_left.data(), params.RESOLUTION,
-                 MPI_DOUBLE, left, 1, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_right.data(), params.RESOLUTION, MPI_DOUBLE, right, 1, recv_left.data(),
+                 params.RESOLUTION, MPI_DOUBLE, left, 1, comm, MPI_STATUS_IGNORE);
 
     for (int j = 0; j < params.RESOLUTION; ++j) {
       lrho_ext[1 * params.RESOLUTION + j] += recv_left[j];
       lrho_ext[(lNx)*params.RESOLUTION + j] += recv_right[j];
     }
 
-    MPI_Sendrecv(&lrho_ext[lNx * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 2, &lrho_ext[0],
-                 params.RESOLUTION, MPI_DOUBLE, left, 2, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&lrho_ext[lNx * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 2,
+                 &lrho_ext[0], params.RESOLUTION, MPI_DOUBLE, left, 2, comm, MPI_STATUS_IGNORE);
     MPI_Sendrecv(&lrho_ext[1 * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, left, 3,
-                 &lrho_ext[(lNx + 1) * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 3, comm,
-                 MPI_STATUS_IGNORE);
+                 &lrho_ext[(lNx + 1) * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 3,
+                 comm, MPI_STATUS_IGNORE);
 
     for (int i = 0; i < lNx; ++i)
-      std::copy_n(&lrho_ext[(i + 1) * params.RESOLUTION], params.RESOLUTION, &lrho[i * params.RESOLUTION]);
+      std::copy_n(&lrho_ext[(i + 1) * params.RESOLUTION], params.RESOLUTION,
+                  &lrho[i * params.RESOLUTION]);
 
     MPI_Barrier(comm);
   }
@@ -530,8 +539,8 @@ class Simulation {
       MPI_Recv(&total_particles, 1, MPI_INT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       std::vector<Particle> particles_global(total_particles);
-      MPI_Recv(particles_global.data(), total_particles * sizeof(Particle), MPI_BYTE, 1, 1, MPI_COMM_WORLD,
-               MPI_STATUS_IGNORE);
+      MPI_Recv(particles_global.data(), total_particles * sizeof(Particle), MPI_BYTE, 1, 1,
+               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       return particles_global;
     }
 
@@ -556,8 +565,8 @@ class Simulation {
     }
 
     MPI_Datatype mpi_particle_type = get_mpi_particle_type();
-    MPI_Gatherv(particles.data(), local_count, mpi_particle_type, global_particles.data(), counts.data(), displs.data(),
-                mpi_particle_type, 0, comm);
+    MPI_Gatherv(particles.data(), local_count, mpi_particle_type, global_particles.data(),
+                counts.data(), displs.data(), mpi_particle_type, 0, comm);
 
     if (rank == 0) {
       int total = static_cast<int>(global_particles.size());
@@ -574,7 +583,8 @@ class Simulation {
 
     if (world_rank == 0) {
       std::vector<double> rho_global(params.RESOLUTION * params.RESOLUTION);
-      MPI_Recv(rho_global.data(), rho_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(rho_global.data(), rho_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
       return rho_global;
     }
 
@@ -597,8 +607,8 @@ class Simulation {
     if (rank == 0)
       rho_global.resize(params.RESOLUTION * params.RESOLUTION);
 
-    MPI_Gatherv(lrho, local_count, MPI_DOUBLE, rho_global.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0,
-                comm);
+    MPI_Gatherv(lrho, local_count, MPI_DOUBLE, rho_global.data(), recvcounts.data(), displs.data(),
+                MPI_DOUBLE, 0, comm);
 
     if (rank == 0) {
       MPI_Send(rho_global.data(), rho_global.size(), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
@@ -613,7 +623,8 @@ class Simulation {
 
     if (world_rank == 0) {
       std::vector<double> lphi_global(params.RESOLUTION * params.RESOLUTION);
-      MPI_Recv(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
       return lphi_global;
     }
 
@@ -636,8 +647,8 @@ class Simulation {
     if (rank == 0)
       lphi_global.resize(params.RESOLUTION * params.RESOLUTION);
 
-    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, lphi_global.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0,
-                comm);
+    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, lphi_global.data(), recvcounts.data(), displs.data(),
+                MPI_DOUBLE, 0, comm);
 
     if (rank == 0) {
       MPI_Send(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
@@ -709,8 +720,8 @@ class Simulation {
     if (rank == 0)
       compact.resize(static_cast<std::size_t>(Nx) * Nyh * 2);
 
-    MPI_Gatherv(reinterpret_cast<const double*>(lrhok), local_dbl_cnt, MPI_DOUBLE, compact.data(), recvcounts.data(),
-                displs.data(), MPI_DOUBLE, 0, comm);
+    MPI_Gatherv(reinterpret_cast<const double*>(lrhok), local_dbl_cnt, MPI_DOUBLE, compact.data(),
+                recvcounts.data(), displs.data(), MPI_DOUBLE, 0, comm);
 
     /* ----- 2. comm‑rank 0 : expand Hermitian half --------------------- */
     if (rank == 0) {

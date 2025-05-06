@@ -88,7 +88,8 @@ inline float scaledArg(const vec2& z) {
 /* ------------------------------------------------------------------------ */
 inline glm::vec3 hsv2rgb(const glm::vec3& hsv) {
   const glm::vec4 K(1.0f, 2.0f / 3.0f, 1.0f / 3.0f, 3.0f);
-  const glm::vec3 p = glm::abs(glm::fract(glm::vec3(hsv.x) + glm::vec3(K.x, K.y, K.z)) * 6.0f - glm::vec3(K.w));
+  const glm::vec3 p =
+      glm::abs(glm::fract(glm::vec3(hsv.x) + glm::vec3(K.x, K.y, K.z)) * 6.0f - glm::vec3(K.w));
   return hsv.z * glm::mix(glm::vec3(K.x), glm::clamp(p - glm::vec3(K.x), 0.0f, 1.0f), hsv.y);
 }
 
@@ -99,6 +100,6 @@ inline float hdrTone(float r, float exposure = 1.0f) {
 inline glm::vec3 complexColour(const glm::vec2& z) {
   const float hue = cx::log(z).y / (2.0f * glm::pi<float>());  // 0‥1
   const float val = hdrTone(glm::length(z), 0.01);
-  const glm::vec3 hsv(hue, 1.0f, val);
+  const glm::vec3 hsv(hue, 1.0f, 1.0);
   return hsv2rgb(hsv);
 }

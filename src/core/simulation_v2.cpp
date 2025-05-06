@@ -2,6 +2,7 @@
 #include <fftw3.h>
 #include <mpi.h>
 #include <omp.h>
+#include <cmath>
 #include <cstddef>
 #include <random>
 
@@ -193,7 +194,7 @@ void Simulation::compute_forces() {
       int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
       size_t idx = size_t(i) * size_t(Ny) + size_t(j);
       double k2 = double(kx * kx + ky * ky);
-      if (k2 == 1e-14) {
+      if (k2 < 1e-14) {
         scratch_k[idx][0] = 0.0;
         scratch_k[idx][1] = 0.0;
       } else {
@@ -221,6 +222,11 @@ void Simulation::compute_forces() {
       xgrad[idx][1] = kx * re;
       ygrad[idx][0] = -ky * im;
       ygrad[idx][1] = ky * re;
+
+      assert(!isnan(xgrad[idx][0]));
+      assert(!isnan(xgrad[idx][1]));
+      assert(!isnan(ygrad[idx][0]));
+      assert(!isnan(ygrad[idx][1]));
     }
   }
 
@@ -306,6 +312,36 @@ std::vector<double> Simulation::gather_rho() const {
               displs.data(), MPI_DOUBLE, 0, comm);
   if (rank == 0) {
     MPI_Send(rho_global.data(), rho_global.size(), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+  }
+
+  return {};
+}
+
+std::vector<vec2> Simulation::gather_ff() const {
+  if (wrank == 0) {
+    std::vector<vec2> ff_global(Nx * Ny);
+    MPI_Recv(ff_global.data(), ff_global.size(), MPI_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD,
+             MPI_STATUS_IGNORE);
+    return ff_global;
+  }
+
+  std::vector<int> recvcounts(size), displs(size);
+  int local_count = lNx * Ny;
+  MPI_Gather(&local_count, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0, comm);
+
+  if (rank == 0) {
+    displs[0] = 0;
+    for (int i = 1; i < size; ++i)
+      displs[i] = displs[i - 1] + recvcounts[i - 1];
+  }
+
+  std::vector<vec2> ff_global;
+  if (rank == 0)
+    ff_global.resize(Nx * Ny);
+  MPI_Gatherv(ff.data(), local_count, MPI_DOUBLE_COMPLEX, ff_global.data(), recvcounts.data(),
+              displs.data(), MPI_DOUBLE_COMPLEX, 0, comm);
+  if (rank == 0) {
+    MPI_Send(ff_global.data(), ff_global.size(), MPI_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
   }
 
   return {};

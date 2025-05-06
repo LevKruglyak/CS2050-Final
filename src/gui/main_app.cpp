@@ -15,6 +15,7 @@ enum class Command : int {
   DeleteSim,
   Step,
   GatherRho,
+  GatherFF,
   GatherRhok,
   GatherPhi,
   GatherParticles,
@@ -46,6 +47,20 @@ class SimulationCached : public Simulation {
     for (int i = 0; i < params.RESOLUTION; i++) {
       for (int j = 0; j < params.RESOLUTION; j++) {
         densityTextureData[i * params.RESOLUTION + j] = globalDensity[i * params.RESOLUTION + j];
+      }
+    }
+
+    broadcast_command(Command::GatherFF);
+    auto globalFF = gather_ff();
+    ffTextureData.reserve(params.RESOLUTION * params.RESOLUTION * 3);
+#pragma omp parallel for collapse(2)
+    for (int i = 0; i < params.RESOLUTION; i++) {
+      for (int j = 0; j < params.RESOLUTION; j++) {
+        glm::vec3 color = complexColour(globalFF[j * params.RESOLUTION + i]);
+
+        ffTextureData[(i * params.RESOLUTION + j) * 3 + 0] = color.x;
+        ffTextureData[(i * params.RESOLUTION + j) * 3 + 1] = color.y;
+        ffTextureData[(i * params.RESOLUTION + j) * 3 + 2] = color.z;
       }
     }
     //
@@ -86,6 +101,13 @@ class SimulationCached : public Simulation {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+
+    glGenTextures(1, &ffTexture);
+    glBindTexture(GL_TEXTURE_2D, ffTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RGB,
+                 GL_FLOAT, ffTextureData.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     //
     //   glGenTextures(1, &densitykTexture);
     //   glBindTexture(GL_TEXTURE_2D, densitykTexture);
@@ -111,6 +133,10 @@ class SimulationCached : public Simulation {
 
     glBindTexture(GL_TEXTURE_2D, densityTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Nx, Ny, GL_RED, GL_FLOAT, densityTextureData.data());
+
+    glBindTexture(GL_TEXTURE_2D, ffTexture);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RGB, GL_FLOAT,
+                    ffTextureData.data());
     //
     //   glBindTexture(GL_TEXTURE_2D, densityTexture);
     //   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RGB, GL_FLOAT,
@@ -130,6 +156,9 @@ class SimulationCached : public Simulation {
 
   GLuint phiTexture;
   std::vector<float> phiTextureData;
+
+  GLuint ffTexture;
+  std::vector<float> ffTextureData;
 
   std::vector<Particle> particles;
   std::vector<double> x_data = {};
@@ -164,6 +193,7 @@ class App {
 
         ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(-hr, -hr),
                           ImPlotPoint(hr, hr));
+        ImPlot::PlotImage("ff", simulation->ffTexture, ImPlotPoint(-hr, -hr), ImPlotPoint(hr, hr));
 
         // Draw the bounds
         if (ImPlot::BeginItem("bounds", 0)) {
@@ -268,6 +298,9 @@ void worker_loop() {
         break;
       case Command::GatherRho:
         sim->gather_rho();
+        break;
+      case Command::GatherFF:
+        sim->gather_ff();
         break;
       case Command::GatherRhok:
         // sim->gather_rhok();

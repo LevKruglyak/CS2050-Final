@@ -79,7 +79,7 @@ class Simulation {
     ygrad = fftw_alloc_complex(lalloc);
     fplan = fftw_mpi_plan_dft_2d(Nx, Ny, scratch_k, scratch_k, comm, FFTW_FORWARD, FFTW_MEASURE);
     bxplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, xgrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
-    byplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, ygrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
+    byplan = fftw_mpi_plan_dft_2d(Nx, Ny, ygrad, ygrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
 
     rho = std::vector<double>(lNx * Ny, 0.0);
     rho_ext = std::vector<double>((lNx + 2) * Ny, 0.0);
@@ -111,6 +111,7 @@ class Simulation {
 
   std::vector<Particle> gather_particles() const;
   std::vector<double> gather_rho() const;
+  std::vector<vec2> gather_ff() const;
 
  private:
   void generate_particles(seed_density seed);
