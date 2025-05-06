@@ -43,8 +43,14 @@ class Simulation {
   std::vector<double> rho;      // density field
   std::vector<double> rho_ext;  // density field (with halo)
 
-  fftw_complex* rho_k = nullptr;  // complex density field (frequency space)
-  fftw_plan rho_fft = nullptr;
+  fftw_complex* scratch_k = nullptr;  // Fourier scratch space
+  fftw_complex* xgrad = nullptr;      // gradient of potential (x-axis)
+  fftw_complex* ygrad = nullptr;      // gradient of potential (y-axis)
+  fftw_plan fplan = nullptr;
+  fftw_plan bxplan = nullptr;
+  fftw_plan byplan = nullptr;
+
+  std::vector<vec2> ff;  // force field
 
   std::vector<Particle> particles;
 
@@ -68,19 +74,36 @@ class Simulation {
     MPI_Comm_size(comm, &size);
 
     ptrdiff_t lalloc = fftw_mpi_local_size_2d(Nx, Ny, comm, &lNx, &lx0);
-    rho_k = fftw_alloc_complex(lalloc);
-    rho_fft = fftw_plan_dft_2d(Nx, Ny, rho_k, rho_k, FFTW_FORWARD, FFTW_MEASURE);
+    scratch_k = fftw_alloc_complex(lalloc);
+    xgrad = fftw_alloc_complex(lalloc);
+    ygrad = fftw_alloc_complex(lalloc);
+    fplan = fftw_mpi_plan_dft_2d(Nx, Ny, scratch_k, scratch_k, comm, FFTW_FORWARD, FFTW_MEASURE);
+    bxplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, xgrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
+    byplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, ygrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
 
     rho = std::vector<double>(lNx * Ny, 0.0);
     rho_ext = std::vector<double>((lNx + 2) * Ny, 0.0);
+    ff = std::vector<vec2>(lNx * Ny, vec2(0.0));
 
     generate_particles(seed_uniform);
     assign_masses();
+    compute_forces();
+  }
+
+  void timestep() {
+    if (wrank == 0)
+      return;
+
+    compute_forces();
   }
 
   ~Simulation() {
-    fftw_destroy_plan(rho_fft);
-    fftw_free(rho_k);
+    fftw_destroy_plan(fplan);
+    fftw_destroy_plan(bxplan);
+    fftw_destroy_plan(byplan);
+    fftw_free(scratch_k);
+    fftw_free(xgrad);
+    fftw_free(ygrad);
 
     if (comm != MPI_COMM_NULL)
       MPI_Comm_free(&comm);
@@ -92,4 +115,5 @@ class Simulation {
  private:
   void generate_particles(seed_density seed);
   void assign_masses();
+  void compute_forces();
 };

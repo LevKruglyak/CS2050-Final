@@ -224,7 +224,6 @@ class App {
 
       if (simulation && ImGui::Button("Update")) {
         broadcast_command(Command::Step);
-        MPI_Barrier(MPI_COMM_WORLD);
         simulation->sync();
       }
     }
@@ -263,8 +262,7 @@ void worker_loop() {
         break;
       case Command::Step:
         if (sim) {
-          // sim->timestep();
-          // MPI_Barrier(MPI_COMM_WORLD);
+          sim->timestep();
         }
 
         break;

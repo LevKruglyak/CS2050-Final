@@ -1,4 +1,5 @@
 #include "simulation_v2.h"
+#include <fftw3.h>
 #include <mpi.h>
 #include <omp.h>
 #include <cstddef>
@@ -167,6 +168,77 @@ const MPI_Datatype get_mpi_particle_type() {
   }
 
   return mpi_particle_type;
+}
+
+void Simulation::compute_forces() {
+  // Set up the conversion to Fourier space
+#pragma omp parallel for collapse(2)
+  for (int i = 0; i < lNx; i++) {
+    for (int j = 0; j < Ny; j++) {
+      scratch_k[i * Ny + j][0] = rho[i * Ny + j];
+      scratch_k[i * Ny + j][1] = 0;
+    }
+  }
+
+  // Forward FFT
+  fftw_execute(fplan);
+
+  // Invert Laplacian in Fourier space
+  double scale = 4 * M_PI * params.GRAVITY;
+#pragma omp parallel for collapse(2)
+  for (ptrdiff_t i = 0; i < lNx; ++i) {
+    int gi = int(lx0 + i);
+    int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
+    for (ptrdiff_t j = 0; j < Ny; ++j) {
+      int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
+      size_t idx = size_t(i) * size_t(Ny) + size_t(j);
+      double k2 = double(kx * kx + ky * ky);
+      if (k2 == 1e-14) {
+        scratch_k[idx][0] = 0.0;
+        scratch_k[idx][1] = 0.0;
+      } else {
+        double s = scale / k2;
+        scratch_k[idx][0] *= s;
+        scratch_k[idx][1] *= s;
+      }
+    }
+  }
+
+  // Compute spectral gradients
+#pragma omp parallel for collapse(2)
+  for (ptrdiff_t i = 0; i < lNx; ++i) {
+    int gi = int(lx0 + i);
+    int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
+
+    for (ptrdiff_t j = 0; j < Ny; ++j) {
+      int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
+      size_t idx = size_t(i) * size_t(Ny) + size_t(j);
+
+      double re = scratch_k[idx][0];
+      double im = scratch_k[idx][1];
+
+      xgrad[idx][0] = -kx * im;
+      xgrad[idx][1] = kx * re;
+      ygrad[idx][0] = -ky * im;
+      ygrad[idx][1] = ky * re;
+    }
+  }
+
+  // Inverse the Fourier transform
+  fftw_execute(bxplan);
+  fftw_execute(byplan);
+
+  // Normalize the Fourier transform and fill the force field
+  double norm = 1.0 / (double(Nx) * double(Ny));
+#pragma omp parallel for collapse(2)
+  for (ptrdiff_t i = 0; i < lNx; ++i) {
+    for (ptrdiff_t j = 0; j < Ny; ++j) {
+      size_t idx = size_t(i) * size_t(Ny) + size_t(j);
+      double fx = xgrad[idx][0] * norm;
+      double fy = ygrad[idx][0] * norm;
+      ff[idx] = vec2(-fx, -fy);
+    }
+  }
 }
 
 std::vector<Particle> Simulation::gather_particles() const {
