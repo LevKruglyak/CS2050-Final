@@ -38,7 +38,7 @@ class SimulationCached : public Simulation {
 
   void load_density() {
     broadcast_command(Command::GatherRho);
-    auto globalDensity = gather_rho();
+    auto globalDensity = gather_phi();
     densityTextureData.reserve(params.RESOLUTION * params.RESOLUTION);
 #pragma omp parallel for collapse(2)
     for (int i = 0; i < params.RESOLUTION; i++) {
@@ -196,6 +196,7 @@ class App {
 
       if (simulation && ImGui::Button("Update")) {
         broadcast_command(Command::Step);
+        MPI_Barrier(MPI_COMM_WORLD);
         simulation->sync();
       }
     }
@@ -234,11 +235,14 @@ void worker_loop() {
       sim = nullptr;
       break;
     case Command::Step:
-      if (sim)
+      if (sim) {
         sim->timestep();
+        MPI_Barrier(MPI_COMM_WORLD);
+      }
+
       break;
     case Command::GatherRho:
-      sim->gather_rho();
+      sim->gather_phi();
       break;
     case Command::GatherParticles:
       sim->gather_particles();
