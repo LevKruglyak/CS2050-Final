@@ -1,19 +1,17 @@
 #pragma once
 
-#include "common.h"
-#include <complex>
 #include <fftw3-mpi.h>
 #include <fftw3.h>
-#include <functional>
 #include <mpi.h>
 #include <omp.h>
+#include <complex>
+#include <functional>
 #include <random>
 #include <vector>
+#include "common.h"
 
 class Simulation {
-  inline vec2 wrap(vec2 v) {
-    return v - glm::round(v / (double)params.RADIUS) * (double)params.RADIUS;
-  };
+  inline vec2 wrap(vec2 v) { return v - glm::round(v / (double)params.RADIUS) * (double)params.RADIUS; };
 
   MPI_Datatype get_mpi_particle_type() const {
     static MPI_Datatype mpi_particle_type;
@@ -26,11 +24,9 @@ class Simulation {
       for (int i = 0; i < n_blocks; i++) {
         offsets[i] = sizeof(double) * i;
       }
-      MPI_Datatype types[n_blocks] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                                      MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                                      MPI_DOUBLE};
-      MPI_Type_create_struct(n_blocks, block_lengths, offsets, types,
-                             &mpi_particle_type);
+      MPI_Datatype types[n_blocks] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
+                                      MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
+      MPI_Type_create_struct(n_blocks, block_lengths, offsets, types, &mpi_particle_type);
       MPI_Type_commit(&mpi_particle_type);
       initialized = true;
     }
@@ -38,10 +34,8 @@ class Simulation {
     return mpi_particle_type;
   }
 
-  std::vector<Particle>
-  generate_local_particles(int lxstart, int lxres,
-                           std::function<double(double, double)> frho,
-                           int rank) {
+  std::vector<Particle> generate_local_particles(int lxstart, int lxres, std::function<double(double, double)> frho,
+                                                 int rank) {
     int num_cells = lxres * params.RESOLUTION;
     std::vector<double> rho_values(num_cells, 0.0);
     double local_density_sum = 0.0;
@@ -71,8 +65,7 @@ class Simulation {
     }
 
     double global_density_sum = 0.0;
-    MPI_Allreduce(&local_density_sum, &global_density_sum, 1, MPI_DOUBLE,
-                  MPI_SUM, comm);
+    MPI_Allreduce(&local_density_sum, &global_density_sum, 1, MPI_DOUBLE, MPI_SUM, comm);
     double mass_per_density = params.MASS / global_density_sum;
 
     std::vector<std::vector<Particle>> thread_particles(omp_get_max_threads());
@@ -107,30 +100,29 @@ class Simulation {
             double x = x_min + dx * u(rng);
             double y = y_min + dy * u(rng);
 
-            thread_particles[tid].emplace_back(Particle{
-                wrap(vec2(x - params.RADIUS / 2, y - params.RADIUS / 2)),
-                vec2(0.0), vec2(0.0), particle_mass});
+            thread_particles[tid].emplace_back(Particle{wrap(vec2(x - params.RADIUS / 2, y - params.RADIUS / 2)),
+                                                        vec2(0.0), vec2(0.0), particle_mass});
           }
         }
       }
     }
 
     std::vector<Particle> particles;
-    for (auto &vec : thread_particles)
+    for (auto& vec : thread_particles)
       particles.insert(particles.end(), vec.begin(), vec.end());
 
     return particles;
   }
 
-public:
+ public:
   struct Params {
-    float GRAVITY = 0.01;         // Gravitational constant
-    float SOFTENING = 0.001;      // Softening length
-    float TIMESTEP = 0.01;        // Integration timestep
-    float RADIUS = 10.0;          // Periodic boundary condition radius
-    float MASS = 50.0;            // Total mass of the universe
-    float PARTICLES_PER_CELL = 4; // Total number of particles
-    ptrdiff_t RESOLUTION = 1024;  // Resolution for density texture
+    float GRAVITY = 0.01;          // Gravitational constant
+    float SOFTENING = 0.001;       // Softening length
+    float TIMESTEP = 0.01;         // Integration timestep
+    float RADIUS = 10.0;           // Periodic boundary condition radius
+    float MASS = 50.0;             // Total mass of the universe
+    float PARTICLES_PER_CELL = 4;  // Total number of particles
+    ptrdiff_t RESOLUTION = 1024;   // Resolution for density texture
   };
 
   Params params;
@@ -148,8 +140,8 @@ public:
   ptrdiff_t lNx, lx0 = 0;
   ptrdiff_t lalloc = 0;
 
-  double *lrho = nullptr; // Density texture
-  double *lphi = nullptr; // Gravitational potential
+  double* lrho = nullptr;  // Density texture
+  double* lphi = nullptr;  // Gravitational potential
 
   std::vector<double> lrho_ext;
 
@@ -157,14 +149,14 @@ public:
   int Ny = 0;
   int Nyh = 0;
 
-  fftw_complex *lrhok = nullptr;
+  fftw_complex* lrhok = nullptr;
   fftw_plan fplan = nullptr;
   fftw_plan bplan = nullptr;
   fftw_plan iplan_grad = nullptr;
 
-  double *lgradx = nullptr;
-  double *lgrady = nullptr;
-  fftw_complex *gradk = nullptr;
+  double* lgradx = nullptr;
+  double* lgrady = nullptr;
+  fftw_complex* gradk = nullptr;
 
   MPI_Comm comm = MPI_COMM_NULL;
 
@@ -198,13 +190,12 @@ public:
 
     std::fill(lrho, lrho + lNx * Ny, 0.0);
     std::fill(lphi, lphi + lNx * Ny, 0.0);
-    std::fill((double *)lrhok, (double *)lrhok + 2 * lNx * Nyh, 0.0);
+    std::fill((double*)lrhok, (double*)lrhok + 2 * lNx * Nyh, 0.0);
 
     fplan = fftw_mpi_plan_dft_r2c_2d(Nx, Ny, lrho, lrhok, comm, FFTW_MEASURE);
     bplan = fftw_mpi_plan_dft_c2r_2d(Nx, Ny, lrhok, lphi, comm, FFTW_MEASURE);
 
-    iplan_grad =
-        fftw_mpi_plan_dft_c2r_2d(Nx, Ny, gradk, lgradx, comm, FFTW_MEASURE);
+    iplan_grad = fftw_mpi_plan_dft_c2r_2d(Nx, Ny, gradk, lgradx, comm, FFTW_MEASURE);
 
     dx = params.RADIUS / params.RESOLUTION;
     dy = params.RADIUS / params.RESOLUTION;
@@ -419,8 +410,7 @@ public:
     for (int r = 0; r < size; ++r)
       send_counts[r] = static_cast<int>(send_buffers[r].size());
 
-    MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
-                 comm);
+    MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, comm);
 
     std::vector<std::vector<Particle>> recv_buffers(size);
     for (int r = 0; r < size; ++r)
@@ -435,23 +425,19 @@ public:
 
       if (send_counts[r] > 0) {
         requests.emplace_back();
-        MPI_Isend(send_buffers[r].data(), send_counts[r], mpi_particle_type, r,
-                  42, comm, &requests.back());
+        MPI_Isend(send_buffers[r].data(), send_counts[r], mpi_particle_type, r, 42, comm, &requests.back());
       }
 
       if (recv_counts[r] > 0) {
         requests.emplace_back();
-        MPI_Irecv(recv_buffers[r].data(), recv_counts[r], mpi_particle_type, r,
-                  42, comm, &requests.back());
+        MPI_Irecv(recv_buffers[r].data(), recv_counts[r], mpi_particle_type, r, 42, comm, &requests.back());
       }
     }
 
-    MPI_Waitall(static_cast<int>(requests.size()), requests.data(),
-                MPI_STATUSES_IGNORE);
+    MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE);
     for (int r = 0; r < size; ++r) {
       if (r != rank && !recv_buffers[r].empty()) {
-        particles.insert(particles.end(), recv_buffers[r].begin(),
-                         recv_buffers[r].end());
+        particles.insert(particles.end(), recv_buffers[r].begin(), recv_buffers[r].end());
       }
     }
   }
@@ -462,11 +448,9 @@ public:
     std::vector<double> send_left(params.RESOLUTION, 0.0);
     std::vector<double> send_right(params.RESOLUTION, 0.0);
 
-    for (const auto &p : particles) {
-      double fx = std::fmod((p.p.x + params.RADIUS * 0.5) / dx,
-                            static_cast<double>(params.RESOLUTION));
-      double fy = std::fmod((p.p.y + params.RADIUS * 0.5) / dy,
-                            static_cast<double>(params.RESOLUTION));
+    for (const auto& p : particles) {
+      double fx = std::fmod((p.p.x + params.RADIUS * 0.5) / dx, static_cast<double>(params.RESOLUTION));
+      double fy = std::fmod((p.p.y + params.RADIUS * 0.5) / dy, static_cast<double>(params.RESOLUTION));
       if (fx < 0)
         fx += params.RESOLUTION;
       if (fy < 0)
@@ -512,30 +496,25 @@ public:
     int left = (rank == 0 ? size - 1 : rank - 1);
     int right = (rank == size - 1 ? 0 : rank + 1);
 
-    MPI_Sendrecv(send_left.data(), params.RESOLUTION, MPI_DOUBLE, left, 0,
-                 recv_right.data(), params.RESOLUTION, MPI_DOUBLE, right, 0,
-                 comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_left.data(), params.RESOLUTION, MPI_DOUBLE, left, 0, recv_right.data(), params.RESOLUTION,
+                 MPI_DOUBLE, right, 0, comm, MPI_STATUS_IGNORE);
 
-    MPI_Sendrecv(send_right.data(), params.RESOLUTION, MPI_DOUBLE, right, 1,
-                 recv_left.data(), params.RESOLUTION, MPI_DOUBLE, left, 1, comm,
-                 MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_right.data(), params.RESOLUTION, MPI_DOUBLE, right, 1, recv_left.data(), params.RESOLUTION,
+                 MPI_DOUBLE, left, 1, comm, MPI_STATUS_IGNORE);
 
     for (int j = 0; j < params.RESOLUTION; ++j) {
       lrho_ext[1 * params.RESOLUTION + j] += recv_left[j];
       lrho_ext[(lNx)*params.RESOLUTION + j] += recv_right[j];
     }
 
-    MPI_Sendrecv(&lrho_ext[lNx * params.RESOLUTION], params.RESOLUTION,
-                 MPI_DOUBLE, right, 2, &lrho_ext[0], params.RESOLUTION,
-                 MPI_DOUBLE, left, 2, comm, MPI_STATUS_IGNORE);
-    MPI_Sendrecv(&lrho_ext[1 * params.RESOLUTION], params.RESOLUTION,
-                 MPI_DOUBLE, left, 3, &lrho_ext[(lNx + 1) * params.RESOLUTION],
-                 params.RESOLUTION, MPI_DOUBLE, right, 3, comm,
+    MPI_Sendrecv(&lrho_ext[lNx * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 2, &lrho_ext[0],
+                 params.RESOLUTION, MPI_DOUBLE, left, 2, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&lrho_ext[1 * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, left, 3,
+                 &lrho_ext[(lNx + 1) * params.RESOLUTION], params.RESOLUTION, MPI_DOUBLE, right, 3, comm,
                  MPI_STATUS_IGNORE);
 
     for (int i = 0; i < lNx; ++i)
-      std::copy_n(&lrho_ext[(i + 1) * params.RESOLUTION], params.RESOLUTION,
-                  &lrho[i * params.RESOLUTION]);
+      std::copy_n(&lrho_ext[(i + 1) * params.RESOLUTION], params.RESOLUTION, &lrho[i * params.RESOLUTION]);
 
     MPI_Barrier(comm);
   }
@@ -548,12 +527,11 @@ public:
 
     if (world_rank == 0) {
       int total_particles = 0;
-      MPI_Recv(&total_particles, 1, MPI_INT, 1, 0, MPI_COMM_WORLD,
-               MPI_STATUS_IGNORE);
+      MPI_Recv(&total_particles, 1, MPI_INT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       std::vector<Particle> particles_global(total_particles);
-      MPI_Recv(particles_global.data(), total_particles * sizeof(Particle),
-               MPI_BYTE, 1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(particles_global.data(), total_particles * sizeof(Particle), MPI_BYTE, 1, 1, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
       return particles_global;
     }
 
@@ -578,15 +556,13 @@ public:
     }
 
     MPI_Datatype mpi_particle_type = get_mpi_particle_type();
-    MPI_Gatherv(particles.data(), local_count, mpi_particle_type,
-                global_particles.data(), counts.data(), displs.data(),
+    MPI_Gatherv(particles.data(), local_count, mpi_particle_type, global_particles.data(), counts.data(), displs.data(),
                 mpi_particle_type, 0, comm);
 
     if (rank == 0) {
       int total = static_cast<int>(global_particles.size());
       MPI_Send(&total, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-      MPI_Send(global_particles.data(), total * sizeof(Particle), MPI_BYTE, 0,
-               1, MPI_COMM_WORLD);
+      MPI_Send(global_particles.data(), total * sizeof(Particle), MPI_BYTE, 0, 1, MPI_COMM_WORLD);
     }
 
     return {};
@@ -598,8 +574,7 @@ public:
 
     if (world_rank == 0) {
       std::vector<double> rho_global(params.RESOLUTION * params.RESOLUTION);
-      MPI_Recv(rho_global.data(), rho_global.size(), MPI_DOUBLE, 1, 0,
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(rho_global.data(), rho_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       return rho_global;
     }
 
@@ -610,8 +585,7 @@ public:
     int local_count = static_cast<int>(local_size);
 
     std::vector<int> recvcounts(size), displs(size);
-    MPI_Gather(&local_count, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0,
-               comm);
+    MPI_Gather(&local_count, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0, comm);
 
     if (rank == 0) {
       displs[0] = 0;
@@ -623,12 +597,11 @@ public:
     if (rank == 0)
       rho_global.resize(params.RESOLUTION * params.RESOLUTION);
 
-    MPI_Gatherv(lrho, local_count, MPI_DOUBLE, rho_global.data(),
-                recvcounts.data(), displs.data(), MPI_DOUBLE, 0, comm);
+    MPI_Gatherv(lrho, local_count, MPI_DOUBLE, rho_global.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0,
+                comm);
 
     if (rank == 0) {
-      MPI_Send(rho_global.data(), rho_global.size(), MPI_DOUBLE, 0, 0,
-               MPI_COMM_WORLD);
+      MPI_Send(rho_global.data(), rho_global.size(), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
     }
 
     return {};
@@ -640,8 +613,7 @@ public:
 
     if (world_rank == 0) {
       std::vector<double> lphi_global(params.RESOLUTION * params.RESOLUTION);
-      MPI_Recv(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 1, 0,
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       return lphi_global;
     }
 
@@ -652,8 +624,7 @@ public:
     int local_count = static_cast<int>(local_size);
 
     std::vector<int> recvcounts(size), displs(size);
-    MPI_Gather(&local_count, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0,
-               comm);
+    MPI_Gather(&local_count, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0, comm);
 
     if (rank == 0) {
       displs[0] = 0;
@@ -665,12 +636,11 @@ public:
     if (rank == 0)
       lphi_global.resize(params.RESOLUTION * params.RESOLUTION);
 
-    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, lphi_global.data(),
-                recvcounts.data(), displs.data(), MPI_DOUBLE, 0, comm);
+    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, lphi_global.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0,
+                comm);
 
     if (rank == 0) {
-      MPI_Send(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 0, 0,
-               MPI_COMM_WORLD);
+      MPI_Send(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
     }
 
     return {};
@@ -687,7 +657,7 @@ public:
      –  All non‑UI ranks return an empty vector.
      -------------------------------------------------------------------- */
   std::vector<glm::vec2> gather_rhok() const {
-    constexpr int TAG = 42; // arbitrary but unique tag
+    constexpr int TAG = 42;  // arbitrary but unique tag
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
@@ -709,16 +679,16 @@ public:
       for (std::size_t k = 0; k < full_c.size(); ++k)
         full_c[k] = glm::vec2(full_d[2 * k], full_d[2 * k + 1]);
 
-      return full_c; // done
+      return full_c;  // done
     }
 
     /* ------------------------------------------------------------------ *
        All other ranks --------------------------------------------------- */
     if (comm == MPI_COMM_NULL)
-      return {}; // defensive: world‑rank 0 only
+      return {};  // defensive: world‑rank 0 only
 
     /* ----- 1.  gather compact slabs → comm‑rank 0 ---------------------- */
-    const ptrdiff_t local_cpx = lNx * Nyh; // complex count
+    const ptrdiff_t local_cpx = lNx * Nyh;  // complex count
     const int local_dbl_cnt = static_cast<int>(local_cpx * 2);
 
     std::vector<int> recvcounts, displs;
@@ -726,7 +696,7 @@ public:
       recvcounts.resize(size);
 
     MPI_Gather(&local_dbl_cnt, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0,
-               comm); // to comm‑rank 0
+               comm);  // to comm‑rank 0
 
     if (rank == 0) {
       displs.resize(size);
@@ -735,13 +705,12 @@ public:
         displs[i] = displs[i - 1] + recvcounts[i - 1];
     }
 
-    std::vector<double> compact; // (Nx × Nyh × 2) doubles
+    std::vector<double> compact;  // (Nx × Nyh × 2) doubles
     if (rank == 0)
       compact.resize(static_cast<std::size_t>(Nx) * Nyh * 2);
 
-    MPI_Gatherv(reinterpret_cast<const double *>(lrhok), local_dbl_cnt,
-                MPI_DOUBLE, compact.data(), recvcounts.data(), displs.data(),
-                MPI_DOUBLE, 0, comm);
+    MPI_Gatherv(reinterpret_cast<const double*>(lrhok), local_dbl_cnt, MPI_DOUBLE, compact.data(), recvcounts.data(),
+                displs.data(), MPI_DOUBLE, 0, comm);
 
     /* ----- 2. comm‑rank 0 : expand Hermitian half --------------------- */
     if (rank == 0) {

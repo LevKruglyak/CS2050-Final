@@ -2,12 +2,11 @@
 #include "imgui.h"
 #include "implot/implot.h"
 #include "implot/implot_internal.h"
-#include "simulation.h"
+#include "simulation_v2.h"
 
 #include <mpi.h>
 #include <memory>
 #include "immapp/runner.h"
-#include "simulation.h"
 #include "visualization.h"
 
 enum class Command : int {
@@ -34,8 +33,8 @@ class SimulationCached : public Simulation {
     x_data.reserve(particles.size());
     y_data.reserve(particles.size());
     for (uint i = 0; i < particles.size(); i++) {
-      x_data[i] = particles[i].p.x;
-      y_data[i] = particles[i].p.y;
+      x_data[i] = particles[i].p.x - params.RADIUS / 2;
+      y_data[i] = particles[i].p.y - params.RADIUS / 2;
     }
   }
 
@@ -46,82 +45,80 @@ class SimulationCached : public Simulation {
 #pragma omp parallel for collapse(2)
     for (int i = 0; i < params.RESOLUTION; i++) {
       for (int j = 0; j < params.RESOLUTION; j++) {
-        densityTextureData[i * params.RESOLUTION + j] = globalDensity[j * params.RESOLUTION + i];
+        densityTextureData[i * params.RESOLUTION + j] = globalDensity[i * params.RESOLUTION + j];
       }
     }
-
-    broadcast_command(Command::GatherRhok);
-    auto globalDensityk = gather_rhok();
-    densitykTextureData.reserve(params.RESOLUTION * params.RESOLUTION * 3);
-#pragma omp parallel for collapse(2)
-    for (int i = 0; i < params.RESOLUTION; i++) {
-      for (int j = 0; j < params.RESOLUTION; j++) {
-        glm::vec3 color = complexColour(globalDensityk[j * params.RESOLUTION + i]);
-
-        densitykTextureData[(i * params.RESOLUTION + j) * 3 + 0] = color.x;
-        densitykTextureData[(i * params.RESOLUTION + j) * 3 + 1] = color.y;
-        densitykTextureData[(i * params.RESOLUTION + j) * 3 + 2] = color.z;
-      }
-    }
-
-    broadcast_command(Command::GatherPhi);
-    auto globalPhiGrad = gather_phi();
-    phiTextureData.reserve(params.RESOLUTION * params.RESOLUTION);
-#pragma omp parallel for collapse(2)
-    for (int i = 0; i < params.RESOLUTION; i++) {
-      for (int j = 0; j < params.RESOLUTION; j++) {
-        phiTextureData[i * params.RESOLUTION + j] = globalPhiGrad[j * params.RESOLUTION + i];
-      }
-    }
+    //
+    //     broadcast_command(Command::GatherRhok);
+    //     auto globalDensityk = gather_rhok();
+    //     densitykTextureData.reserve(params.RESOLUTION * params.RESOLUTION * 3);
+    // #pragma omp parallel for collapse(2)
+    //     for (int i = 0; i < params.RESOLUTION; i++) {
+    //       for (int j = 0; j < params.RESOLUTION; j++) {
+    //         glm::vec3 color = complexColour(globalDensityk[j * params.RESOLUTION + i]);
+    //
+    //         densitykTextureData[(i * params.RESOLUTION + j) * 3 + 0] = color.x;
+    //         densitykTextureData[(i * params.RESOLUTION + j) * 3 + 1] = color.y;
+    //         densitykTextureData[(i * params.RESOLUTION + j) * 3 + 2] = color.z;
+    //       }
+    //     }
+    //
+    //     broadcast_command(Command::GatherPhi);
+    //     auto globalPhiGrad = gather_phi();
+    //     phiTextureData.reserve(params.RESOLUTION * params.RESOLUTION);
+    // #pragma omp parallel for collapse(2)
+    //     for (int i = 0; i < params.RESOLUTION; i++) {
+    //       for (int j = 0; j < params.RESOLUTION; j++) {
+    //         phiTextureData[i * params.RESOLUTION + j] = globalPhiGrad[j * params.RESOLUTION + i];
+    //       }
+    //     }
   }
 
   void init_textures() {
     load_textures();
-
     glGenTextures(1, &densityTexture);
     glBindTexture(GL_TEXTURE_2D, densityTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED, GL_FLOAT,
-                 densityTextureData.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED,
+                 GL_FLOAT, densityTextureData.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
-
-    glGenTextures(1, &densitykTexture);
-    glBindTexture(GL_TEXTURE_2D, densitykTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RGB, GL_FLOAT,
-                 densitykTextureData.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    glGenTextures(1, &phiTexture);
-    glBindTexture(GL_TEXTURE_2D, phiTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED, GL_FLOAT,
-                 phiTextureData.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+    //
+    //   glGenTextures(1, &densitykTexture);
+    //   glBindTexture(GL_TEXTURE_2D, densitykTexture);
+    //   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RGB, GL_FLOAT,
+    //                densitykTextureData.data());
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    //
+    //   glGenTextures(1, &phiTexture);
+    //   glBindTexture(GL_TEXTURE_2D, phiTexture);
+    //   glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED, GL_FLOAT,
+    //                phiTextureData.data());
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+    //   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
   }
 
   void sync_textures() {
     load_textures();
 
     glBindTexture(GL_TEXTURE_2D, densityTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RED, GL_FLOAT,
-                    densityTextureData.data());
-
-    glBindTexture(GL_TEXTURE_2D, densityTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RGB, GL_FLOAT,
-                    densitykTextureData.data());
-
-    glBindTexture(GL_TEXTURE_2D, phiTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RED, GL_FLOAT,
-                    phiTextureData.data());
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Nx, Ny, GL_RED, GL_FLOAT, densityTextureData.data());
+    //
+    //   glBindTexture(GL_TEXTURE_2D, densityTexture);
+    //   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RGB, GL_FLOAT,
+    //                   densitykTextureData.data());
+    //
+    //   glBindTexture(GL_TEXTURE_2D, phiTexture);
+    //   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RED, GL_FLOAT,
+    //                   phiTextureData.data());
   }
 
  public:
@@ -158,18 +155,15 @@ class App {
 
   void viewport_gui() {
     ImGui::Begin("Viewport");
-    if (ImPlot::BeginPlot("Viewport", ImVec2(-1.0, -1.0), ImPlotFlags_Equal | ImPlotFlags_NoTitle)) {
+    if (ImPlot::BeginPlot("Viewport", ImVec2(-1.0, -1.0),
+                          ImPlotFlags_Equal | ImPlotFlags_NoTitle)) {
       ImPlot::SetupAxes("", "");
 
       if (simulation != nullptr) {
-        float hr = simulation->params.RADIUS / 2.0;
+        float hr = params.RADIUS / 2.0;
 
-        // Draw the density
-        ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(-hr, hr), ImPlotPoint(hr, -hr));
-
-        ImPlot::PlotImage("density_k", simulation->densitykTexture, ImPlotPoint(-hr, hr), ImPlotPoint(hr, -hr));
-
-        ImPlot::PlotImage("potential", simulation->phiTexture, ImPlotPoint(-hr, hr), ImPlotPoint(hr, -hr));
+        ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(-hr, -hr),
+                          ImPlotPoint(hr, hr));
 
         // Draw the bounds
         if (ImPlot::BeginItem("bounds", 0)) {
@@ -179,29 +173,6 @@ class App {
           draw_list->AddRect(p_min, p_max, ImPlot::GetCurrentItem()->Color, 0.0f, 0, 2.0f);
           ImPlot::EndItem();
         }
-
-        // if (ImPlot::BeginItem("MPI bounds", 0)) {
-        //   ImDrawList *draw_list = ImPlot::GetPlotDrawList();
-        //   float dx = simulation->dx;
-        //   int resolution = simulation->params.RESOLUTION;
-        //
-        //   int n_ranks = simulation->size;
-        //
-        //   for (int r = 0; r < n_ranks; ++r) {
-        //     float x0 =
-        //         -hr + r * ceil(simulation->params.RESOLUTION / n_ranks) * dx;
-        //     float x1 = -hr + (r + 1) *
-        //                          ceil(simulation->params.RESOLUTION /
-        //                          n_ranks) * dx;
-        //
-        //     ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(x0, -hr));
-        //     ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(x1, hr));
-        //     draw_list->AddRect(p_min, p_max, ImPlot::GetCurrentItem()->Color,
-        //                        0.0f, 0, 1.5f);
-        //   }
-        //
-        //   ImPlot::EndItem();
-        // }
 
         // Draw the particles
         ImPlot::GetStyle().MarkerSize = particle_radius;
@@ -224,11 +195,15 @@ class App {
 
     if (ImGui::CollapsingHeader("Simulation Controls")) {
       ImGui::BeginDisabled(simulation != nullptr);
-      ImGui::SliderFloat("Gravitational Constant", &params.GRAVITY, 1e-4, 1e4, "%e", ImGuiSliderFlags_Logarithmic);
+      ImGui::SliderFloat("Gravitational Constant", &params.GRAVITY, 1e-4, 1e4, "%e",
+                         ImGuiSliderFlags_Logarithmic);
       ImGui::SliderFloat("Universe Radius", &params.RADIUS, 1, 1000, "%e");
-      ImGui::SliderFloat("Universe Mass", &params.MASS, 1e-4, 1e4, "%e", ImGuiSliderFlags_Logarithmic);
-      ImGui::SliderFloat("Integration Timestep", &params.TIMESTEP, 1e-4, 1e4, "%e", ImGuiSliderFlags_Logarithmic);
-      ImGui::SliderFloat("Gravitational Softening", &params.SOFTENING, 1e-4, 1e4, "%e", ImGuiSliderFlags_Logarithmic);
+      ImGui::SliderFloat("Universe Mass", &params.MASS, 1e-4, 1e4, "%e",
+                         ImGuiSliderFlags_Logarithmic);
+      ImGui::SliderFloat("Integration Timestep", &params.TIMESTEP, 1e-4, 1e4, "%e",
+                         ImGuiSliderFlags_Logarithmic);
+      ImGui::SliderFloat("Gravitational Softening", &params.SOFTENING, 1e-4, 1e4, "%e",
+                         ImGuiSliderFlags_Logarithmic);
       int resolution = params.RESOLUTION;
       ImGui::SliderInt("Density Texture Resolution", &resolution, 32, 4096);
       params.RESOLUTION = resolution;
@@ -288,8 +263,8 @@ void worker_loop() {
         break;
       case Command::Step:
         if (sim) {
-          sim->timestep();
-          MPI_Barrier(MPI_COMM_WORLD);
+          // sim->timestep();
+          // MPI_Barrier(MPI_COMM_WORLD);
         }
 
         break;
@@ -297,10 +272,10 @@ void worker_loop() {
         sim->gather_rho();
         break;
       case Command::GatherRhok:
-        sim->gather_rhok();
+        // sim->gather_rhok();
         break;
       case Command::GatherPhi:
-        sim->gather_phi();
+        // sim->gather_phi();
         break;
       case Command::GatherParticles:
         sim->gather_particles();
@@ -327,7 +302,8 @@ int main(int argc, char** argv) {
     params.appWindowParams.windowGeometry.size = {1920, 1080};
     params.imGuiWindowParams.showMenuBar = true;
     params.imGuiWindowParams.showStatusBar = false;
-    params.imGuiWindowParams.defaultImGuiWindowType = HelloImGui::DefaultImGuiWindowType::ProvideFullScreenDockSpace;
+    params.imGuiWindowParams.defaultImGuiWindowType =
+        HelloImGui::DefaultImGuiWindowType::ProvideFullScreenDockSpace;
     params.fpsIdling.enableIdling = false;
     params.callbacks.PostInit = [&app]() {
       app->init();

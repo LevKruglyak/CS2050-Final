@@ -13,17 +13,20 @@ class Simulation {
   inline static const seed_density seed_uniform = [](double x, double y) {
     return 1.0;
   };
+  inline static const seed_density seed_gaussian = [](double x, double y) {
+    constexpr double sigma = 0.5;
+    constexpr double norm = 1.0 / (2.0 * M_PI * sigma * sigma);
+    return norm * std::exp(-(x * x + y * y) / (2.0 * sigma * sigma));
+  };
 
- private:
   struct Params {
-    float GRAVITY = 0.01;                 // Gravitational constant
-    float SOFTENING = 0.001;              // Softening length
-    float TIMESTEP = 0.01;                // Integration timestep
-    float RADIUS = 10.0;                  // Periodic boundary condition radius
-    float MASS = 50.0;                    // Total mass of the universe
-    float PARTICLES_PER_CELL = 4;         // Total number of particles
-    ptrdiff_t RESOLUTION = 1024;          // Resolution for density texture
-    seed_density DENSITY = seed_uniform;  // Initial density distribution (un-normalized)
+    float GRAVITY = 0.01;          // Gravitational constant
+    float SOFTENING = 0.001;       // Softening length
+    float TIMESTEP = 0.01;         // Integration timestep
+    float RADIUS = 10.0;           // Periodic boundary condition radius
+    float MASS = 50.0;             // Total mass of the universe
+    float PARTICLES_PER_CELL = 4;  // Total number of particles
+    ptrdiff_t RESOLUTION = 1024;   // Resolution for density texture
   };
 
   Params params;
@@ -36,6 +39,9 @@ class Simulation {
   double Lx, Ly;       // mesh dimensions (length)
   double dx, dy;       // cell dimensions (length)
   ptrdiff_t lNx, lx0;  // rank strip length, strip start
+
+  std::vector<double> rho;      // density field
+  std::vector<double> rho_ext;  // density field (with halo)
 
   fftw_complex* rho_k = nullptr;  // complex density field (frequency space)
   fftw_plan rho_fft = nullptr;
@@ -65,7 +71,11 @@ class Simulation {
     rho_k = fftw_alloc_complex(lalloc);
     rho_fft = fftw_plan_dft_2d(Nx, Ny, rho_k, rho_k, FFTW_FORWARD, FFTW_MEASURE);
 
-    generate_particles(params.DENSITY, params.PARTICLES_PER_CELL);
+    rho = std::vector<double>(lNx * Ny, 0.0);
+    rho_ext = std::vector<double>((lNx + 2) * Ny, 0.0);
+
+    generate_particles(seed_uniform);
+    assign_masses();
   }
 
   ~Simulation() {
@@ -76,8 +86,10 @@ class Simulation {
       MPI_Comm_free(&comm);
   }
 
-  std::vector<Particle> gather_particles();
+  std::vector<Particle> gather_particles() const;
+  std::vector<double> gather_rho() const;
 
  private:
-  void generate_particles(seed_density seed, int particles_per_cell);
+  void generate_particles(seed_density seed);
+  void assign_masses();
 };
