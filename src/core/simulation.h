@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include <complex>
 #include <fftw3-mpi.h>
 #include <fftw3.h>
 #include <functional>
@@ -144,17 +145,26 @@ public:
   float dx;
   float dy;
 
-  ptrdiff_t lxres, lxstart = 0;
+  ptrdiff_t lNx, lx0 = 0;
   ptrdiff_t lalloc = 0;
 
-  double *lrho = nullptr;
-  fftw_complex *lrhok = nullptr;
-  double *lphi = nullptr;
+  double *lrho = nullptr; // Density texture
+  double *lphi = nullptr; // Gravitational potential
 
   std::vector<double> lrho_ext;
 
+  int Nx = 0;
+  int Ny = 0;
+  int Nyh = 0;
+
+  fftw_complex *lrhok = nullptr;
   fftw_plan fplan = nullptr;
   fftw_plan bplan = nullptr;
+  fftw_plan iplan_grad = nullptr;
+
+  double *lgradx = nullptr;
+  double *lgrady = nullptr;
+  fftw_complex *gradk = nullptr;
 
   MPI_Comm comm = MPI_COMM_NULL;
 
@@ -172,33 +182,54 @@ public:
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    lalloc = fftw_mpi_local_size_2d(
-        params.RESOLUTION, params.RESOLUTION / 2 + 1, comm, &lxres, &lxstart);
-    lrho = fftw_alloc_real(2 * lalloc);
-    lrho_ext = std::vector<double>((lxres + 2) * params.RESOLUTION, 0.0);
-    lrhok = fftw_alloc_complex(lalloc);
-    lphi = fftw_alloc_real(2 * lalloc);
-    fplan = fftw_mpi_plan_dft_r2c_2d(params.RESOLUTION, params.RESOLUTION, lrho,
-                                     lrhok, comm, FFTW_MEASURE);
-    bplan = fftw_mpi_plan_dft_c2r_2d(params.RESOLUTION, params.RESOLUTION,
-                                     lrhok, lphi, comm, FFTW_MEASURE);
+    Nx = params.RESOLUTION;
+    Ny = params.RESOLUTION;
+    Nyh = Ny / 2 + 1;
+
+    lalloc = fftw_mpi_local_size_2d(Nx, Nyh, comm, &lNx, &lx0);
+    lrho = fftw_alloc_real(lNx * Ny);
+    lphi = fftw_alloc_real(lNx * Ny);
+    lrho_ext = std::vector<double>((lNx + 2) * Ny, 0.0);
+    lrhok = fftw_alloc_complex(lNx * Nyh);
+
+    lgradx = fftw_alloc_real(lNx * Ny);
+    lgrady = fftw_alloc_real(lNx * Ny);
+    gradk = fftw_alloc_complex(lNx * Nyh);
+
+    std::fill(lrho, lrho + lNx * Ny, 0.0);
+    std::fill(lphi, lphi + lNx * Ny, 0.0);
+    std::fill((double *)lrhok, (double *)lrhok + 2 * lNx * Nyh, 0.0);
+
+    fplan = fftw_mpi_plan_dft_r2c_2d(Nx, Ny, lrho, lrhok, comm, FFTW_MEASURE);
+    bplan = fftw_mpi_plan_dft_c2r_2d(Nx, Ny, lrhok, lphi, comm, FFTW_MEASURE);
+
+    iplan_grad =
+        fftw_mpi_plan_dft_c2r_2d(Nx, Ny, gradk, lgradx, comm, FFTW_MEASURE);
 
     dx = params.RADIUS / params.RESOLUTION;
     dy = params.RADIUS / params.RESOLUTION;
 
     auto frho = [&params](double x, double y) -> double {
-      x -= params.RADIUS / 2;
-      y -= params.RADIUS / 2;
-      constexpr double sigma = 0.5;
-      constexpr double norm = 1.0 / (2.0 * M_PI * sigma * sigma);
-      return norm * std::exp(-(x * x + y * y) / (2.0 * sigma * sigma));
+      return sin(20.0 * x) * sin(20.0 * y);
+      // x -= params.RADIUS / 2;
+      // y -= params.RADIUS / 2;
+      // constexpr double sigma = 0.5;
+      // constexpr double norm = 1.0 / (2.0 * M_PI * sigma * sigma);
+      // return norm * std::exp(-(x * x + y * y) / (2.0 * sigma * sigma));
     };
 
     // Initialize particles
-    particles = generate_local_particles(lxstart, lxres, frho, rank);
+    particles = generate_local_particles(lx0, lNx, frho, rank);
 
     // Initialize density texture
     mass_assignment();
+
+    for (int i = lx0; i < lNx; ++i) {
+      for (int j = 0; j < Ny; ++j) {
+        lrho[i * lNx + j] = ceil(sin(0.05 * i) + cos(0.05 * j) - 0.02);
+      }
+    }
+    solve_poisson();
   }
 
   ~Simulation() {
@@ -222,7 +253,6 @@ public:
       return;
 
     mass_assignment();
-    solve_poisson();
     // compute_forces();
     // reassign_particles();
   }
@@ -230,160 +260,132 @@ public:
   void solve_poisson() {
     fftw_execute(fplan);
 
-    for (int i = 0; i < params.RESOLUTION * params.RESOLUTION; i++) {
-      lrhok[i][0] /= (i + 1);
-      lrhok[i][1] /= (i + 1);
-    }
+    int Lx = params.RADIUS;
+    int Ly = params.RADIUS;
 
-    // int II, JJ;
-    // double kx, ky;
-    // for (int i = 0; i < params.RESOLUTION; ++i) {
-    //   II = (2 * i < params.RESOLUTION)
-    //            ? i
-    //            : params.RESOLUTION - i; // “wrapped” integer wave‑number
-    //   kx = 2 * M_PI * II / params.RADIUS;
-    //
-    //   for (int j = 0; j < params.RESOLUTION / 2 + 1; ++j) {
-    //     JJ = (2 * j < params.RESOLUTION) ? j : M_PI - j;
-    //     ky = 2 * M_PI * JJ / params.RADIUS;
-    //
-    //     double k2 = kx * kx + ky * ky;                 // |k|²
-    //     int idx = j + (params.RESOLUTION / 2 + 1) * i; // flattened index
-    //
-    //     if (k2 < 1e-14) {
-    //       lrhok[idx][0] = 0.0;
-    //       lrhok[idx][1] = 0.0;
-    //     } else {
-    //       lrhok[idx][0] /= (-k2);
-    //       lrhok[idx][1] /= (-k2);
-    //     }
-    //   }
-    // }
-
-    // #pragma omp parallel for collapse(2)
-    //     for (ptrdiff_t i = 0; i < lxres; ++i) {
-    //       for (ptrdiff_t j = 0; j < params.RESOLUTION / 2 + 1; ++j) {
-    //         ptrdiff_t global_i = lxstart + i;
-    //         ptrdiff_t idx = i * (params.RESOLUTION / 2 + 1) + j;
-    //
-    //         double kx = 2.0 * M_PI * global_i / params.RADIUS;
-    //         double ky = 2.0 * M_PI * j / params.RADIUS;
-    //
-    //         double k2 = kx * kx + ky * ky;
-    //
-    //         if (k2 > 0.0) {
-    //           double scale = 1 / sqrt(k2);
-    //           lrhok[idx][0] *= scale;
-    //           lrhok[idx][1] *= scale;
-    //         } else {
-    //           lrhok[idx][0] = 0.0;
-    //           lrhok[idx][1] = 0.0;
-    //         }
-    //       }
-    //     }
-
-    fftw_execute(bplan);
-
-    double norm = 1.0 / (params.RESOLUTION * params.RESOLUTION);
-#pragma omp parallel for
-    for (ptrdiff_t i = 0; i < lxres * params.RESOLUTION; ++i)
-      lphi[i] *= norm;
-  }
-
-  void compute_forces() {
-    std::vector<double> fx_local(lxres * params.RESOLUTION, 0.0);
-    std::vector<double> fy_local(lxres * params.RESOLUTION, 0.0);
-    fftw_complex *fx_k = fftw_alloc_complex(lalloc);
-    fftw_complex *fy_k = fftw_alloc_complex(lalloc);
-
-    // Compute force in Fourier space from potential
 #pragma omp parallel for collapse(2)
-    for (ptrdiff_t i = 0; i < lxres; ++i) {
-      for (ptrdiff_t j = 0; j < params.RESOLUTION / 2 + 1; ++j) {
-        ptrdiff_t global_i = lxstart + i;
-        ptrdiff_t idx = i * (params.RESOLUTION / 2 + 1) + j;
+    for (ptrdiff_t i = 0; i < lNx; ++i) {
+      ptrdiff_t gi = i + lx0;
+      ptrdiff_t ki = (gi <= Nx / 2) ? gi : gi - Nx;
+      double kx = 2 * M_PI * ki / Lx;
 
-        double kx = 2.0 * M_PI * global_i / params.RADIUS;
-        double ky = 2.0 * M_PI * j / params.RADIUS;
+      for (ptrdiff_t j = 0; j < Nyh; ++j) {
+        ptrdiff_t idx = i * Nyh + j;
+        double ky = 2 * M_PI * j / Ly;
+        double k2 = kx * kx + ky * ky;
 
-        double phi_re = lrhok[idx][0];
-        double phi_im = lrhok[idx][1];
-
-        fx_k[idx][0] = kx * phi_im;
-        fx_k[idx][1] = -kx * phi_re;
-        fy_k[idx][0] = ky * phi_im;
-        fy_k[idx][1] = -ky * phi_re;
-      }
-    }
-
-    fftw_plan fx_plan =
-        fftw_mpi_plan_dft_c2r_2d(params.RESOLUTION, params.RESOLUTION, fx_k,
-                                 fx_local.data(), comm, FFTW_MEASURE);
-    fftw_plan fy_plan =
-        fftw_mpi_plan_dft_c2r_2d(params.RESOLUTION, params.RESOLUTION, fy_k,
-                                 fy_local.data(), comm, FFTW_MEASURE);
-    fftw_execute(fx_plan);
-    fftw_execute(fy_plan);
-
-    double norm = 1.0 / (params.RESOLUTION * params.RESOLUTION);
-#pragma omp parallel for
-    for (ptrdiff_t i = 0; i < lxres * params.RESOLUTION; ++i) {
-      fx_local[i] *= norm;
-      fy_local[i] *= norm;
-    }
-
-    fftw_destroy_plan(fx_plan);
-    fftw_destroy_plan(fy_plan);
-    fftw_free(fx_k);
-    fftw_free(fy_k);
-
-    // === CIC force interpolation back to particles ===
-    for (auto &p : particles) {
-      double fx = std::fmod((p.p.x + params.RADIUS / 2) / dx,
-                            (double)params.RESOLUTION);
-      double fy = std::fmod((p.p.y + params.RADIUS / 2) / dy,
-                            (double)params.RESOLUTION);
-      if (fx < 0)
-        fx += params.RESOLUTION;
-      if (fy < 0)
-        fy += params.RESOLUTION;
-
-      int gx = (int)std::floor(fx);
-      int gy = (int)std::floor(fy);
-
-      double dx1 = fx - gx, dx0 = 1.0 - dx1;
-      double dy1 = fy - gy, dy0 = 1.0 - dy1;
-
-      vec2 interpolated_force = vec2(0.0);
-
-      for (int di = 0; di <= 1; ++di) {
-        int i_glob = (gx + di) % params.RESOLUTION;
-        bool owned = (i_glob >= lxstart) && (i_glob < lxstart + lxres);
-
-        if (!owned)
-          continue;
-
-        int lx = i_glob - lxstart;
-
-        for (int dj = 0; dj <= 1; ++dj) {
-          int j_glob = (gy + dj) % params.RESOLUTION;
-          double weight = (di == 0 ? dx0 : dx1) * (dj == 0 ? dy0 : dy1);
-
-          std::ptrdiff_t idx = lx * params.RESOLUTION + j_glob;
-          interpolated_force.x += weight * fx_local[idx];
-          interpolated_force.y += weight * fy_local[idx];
+        if (k2 > 0.0) {
+          lrhok[idx][0] *= 4 * M_PI * params.GRAVITY / k2;
+          lrhok[idx][1] *= 4 * M_PI * params.GRAVITY / k2;
+        } else {
+          lrhok[idx][0] = 0.0;
+          lrhok[idx][1] = 0.0;
         }
       }
-
-      vec2 np = wrap(p.p + p.v * (double)params.TIMESTEP +
-                     p.a * (params.TIMESTEP * params.TIMESTEP * 0.5));
-      vec2 na = interpolated_force;
-
-      p.p = np;
-      p.v += (p.a + na) * (params.TIMESTEP * 0.5);
-      p.a = na;
     }
+    fftw_execute(bplan);
+
+#pragma omp parallel for
+    for (ptrdiff_t i = 0; i < lNx * Ny; ++i)
+      lphi[i] /= Nx * Ny;
   }
+
+  //   void compute_forces() {
+  //     std::vector<double> fx_local(lNx * params.RESOLUTION, 0.0);
+  //     std::vector<double> fy_local(lNx * params.RESOLUTION, 0.0);
+  //     fftw_complex *fx_k = fftw_alloc_complex(lalloc);
+  //     fftw_complex *fy_k = fftw_alloc_complex(lalloc);
+  //
+  //     // Compute force in Fourier space from potential
+  // #pragma omp parallel for collapse(2)
+  //     for (ptrdiff_t i = 0; i < lNx; ++i) {
+  //       for (ptrdiff_t j = 0; j < params.RESOLUTION / 2 + 1; ++j) {
+  //         ptrdiff_t global_i = lx0 + i;
+  //         ptrdiff_t idx = i * (params.RESOLUTION / 2 + 1) + j;
+  //
+  //         double kx = 2.0 * M_PI * global_i / params.RADIUS;
+  //         double ky = 2.0 * M_PI * j / params.RADIUS;
+  //
+  //         double phi_re = lrhok[idx][0];
+  //         double phi_im = lrhok[idx][1];
+  //
+  //         fx_k[idx][0] = kx * phi_im;
+  //         fx_k[idx][1] = -kx * phi_re;
+  //         fy_k[idx][0] = ky * phi_im;
+  //         fy_k[idx][1] = -ky * phi_re;
+  //       }
+  //     }
+  //
+  //     fftw_plan fx_plan =
+  //         fftw_mpi_plan_dft_c2r_2d(params.RESOLUTION, params.RESOLUTION,
+  //         fx_k,
+  //                                  fx_local.data(), comm, FFTW_MEASURE);
+  //     fftw_plan fy_plan =
+  //         fftw_mpi_plan_dft_c2r_2d(params.RESOLUTION, params.RESOLUTION,
+  //         fy_k,
+  //                                  fy_local.data(), comm, FFTW_MEASURE);
+  //     fftw_execute(fx_plan);
+  //     fftw_execute(fy_plan);
+  //
+  //     double norm = 1.0 / (params.RESOLUTION * params.RESOLUTION);
+  // #pragma omp parallel for
+  //     for (ptrdiff_t i = 0; i < lNx * params.RESOLUTION; ++i) {
+  //       fx_local[i] *= norm;
+  //       fy_local[i] *= norm;
+  //     }
+  //
+  //     fftw_destroy_plan(fx_plan);
+  //     fftw_destroy_plan(fy_plan);
+  //     fftw_free(fx_k);
+  //     fftw_free(fy_k);
+  //
+  //     // === CIC force interpolation back to particles ===
+  //     for (auto &p : particles) {
+  //       double fx = std::fmod((p.p.x + params.RADIUS / 2) / dx,
+  //                             (double)params.RESOLUTION);
+  //       double fy = std::fmod((p.p.y + params.RADIUS / 2) / dy,
+  //                             (double)params.RESOLUTION);
+  //       if (fx < 0)
+  //         fx += params.RESOLUTION;
+  //       if (fy < 0)
+  //         fy += params.RESOLUTION;
+  //
+  //       int gx = (int)std::floor(fx);
+  //       int gy = (int)std::floor(fy);
+  //
+  //       double dx1 = fx - gx, dx0 = 1.0 - dx1;
+  //       double dy1 = fy - gy, dy0 = 1.0 - dy1;
+  //
+  //       vec2 interpolated_force = vec2(0.0);
+  //
+  //       for (int di = 0; di <= 1; ++di) {
+  //         int i_glob = (gx + di) % params.RESOLUTION;
+  //         bool owned = (i_glob >= lx0) && (i_glob < lx0 + lNx);
+  //
+  //         if (!owned)
+  //           continue;
+  //
+  //         int lx = i_glob - lx0;
+  //
+  //         for (int dj = 0; dj <= 1; ++dj) {
+  //           int j_glob = (gy + dj) % params.RESOLUTION;
+  //           double weight = (di == 0 ? dx0 : dx1) * (dj == 0 ? dy0 : dy1);
+  //
+  //           std::ptrdiff_t idx = lx * params.RESOLUTION + j_glob;
+  //           interpolated_force.x += weight * fx_local[idx];
+  //           interpolated_force.y += weight * fy_local[idx];
+  //         }
+  //       }
+  //
+  //       vec2 np = wrap(p.p + p.v * (double)params.TIMESTEP +
+  //                      p.a * (params.TIMESTEP * params.TIMESTEP * 0.5));
+  //       vec2 na = interpolated_force;
+  //
+  //       p.p = np;
+  //       p.v += (p.a + na) * (params.TIMESTEP * 0.5);
+  //       p.a = na;
+  //     }
+  //   }
 
   void reassign_particles() {
     if (comm == MPI_COMM_NULL)
@@ -480,7 +482,7 @@ public:
         int i_glob = (gx + di) % params.RESOLUTION;
         double wx = (di == 0 ? dx0 : dx1);
 
-        bool owned = (i_glob >= lxstart) && (i_glob < lxstart + lxres);
+        bool owned = (i_glob >= lx0) && (i_glob < lx0 + lNx);
 
         for (int dj = 0; dj <= 1; ++dj) {
           int j_glob = (gy + dj) % params.RESOLUTION;
@@ -489,12 +491,11 @@ public:
           double mass = (wx * wy) * (p.mass / (dx * dy));
 
           if (owned) {
-            int lx = i_glob - lxstart + 1;
+            int lx = i_glob - lx0 + 1;
             lrho_ext[lx * params.RESOLUTION + j_glob] += mass;
           } else {
-            int left_edge =
-                (lxstart - 1 + params.RESOLUTION) % params.RESOLUTION;
-            int right_edge = (lxstart + lxres) % params.RESOLUTION;
+            int left_edge = (lx0 - 1 + params.RESOLUTION) % params.RESOLUTION;
+            int right_edge = (lx0 + lNx) % params.RESOLUTION;
 
             if (i_glob == left_edge)
               send_left[j_glob] += mass;
@@ -521,18 +522,18 @@ public:
 
     for (int j = 0; j < params.RESOLUTION; ++j) {
       lrho_ext[1 * params.RESOLUTION + j] += recv_left[j];
-      lrho_ext[(lxres)*params.RESOLUTION + j] += recv_right[j];
+      lrho_ext[(lNx)*params.RESOLUTION + j] += recv_right[j];
     }
 
-    MPI_Sendrecv(&lrho_ext[lxres * params.RESOLUTION], params.RESOLUTION,
+    MPI_Sendrecv(&lrho_ext[lNx * params.RESOLUTION], params.RESOLUTION,
                  MPI_DOUBLE, right, 2, &lrho_ext[0], params.RESOLUTION,
                  MPI_DOUBLE, left, 2, comm, MPI_STATUS_IGNORE);
     MPI_Sendrecv(&lrho_ext[1 * params.RESOLUTION], params.RESOLUTION,
-                 MPI_DOUBLE, left, 3,
-                 &lrho_ext[(lxres + 1) * params.RESOLUTION], params.RESOLUTION,
-                 MPI_DOUBLE, right, 3, comm, MPI_STATUS_IGNORE);
+                 MPI_DOUBLE, left, 3, &lrho_ext[(lNx + 1) * params.RESOLUTION],
+                 params.RESOLUTION, MPI_DOUBLE, right, 3, comm,
+                 MPI_STATUS_IGNORE);
 
-    for (int i = 0; i < lxres; ++i)
+    for (int i = 0; i < lNx; ++i)
       std::copy_n(&lrho_ext[(i + 1) * params.RESOLUTION], params.RESOLUTION,
                   &lrho[i * params.RESOLUTION]);
 
@@ -605,7 +606,7 @@ public:
     if (comm == MPI_COMM_NULL)
       return {};
 
-    ptrdiff_t local_size = lxres * params.RESOLUTION;
+    ptrdiff_t local_size = lNx * params.RESOLUTION;
     int local_count = static_cast<int>(local_size);
 
     std::vector<int> recvcounts(size), displs(size);
@@ -638,16 +639,16 @@ public:
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
     if (world_rank == 0) {
-      std::vector<double> phi_global(params.RESOLUTION * params.RESOLUTION);
-      MPI_Recv(phi_global.data(), phi_global.size(), MPI_DOUBLE, 1, 0,
+      std::vector<double> lphi_global(params.RESOLUTION * params.RESOLUTION);
+      MPI_Recv(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 1, 0,
                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      return phi_global;
+      return lphi_global;
     }
 
     if (comm == MPI_COMM_NULL)
       return {};
 
-    ptrdiff_t local_size = lxres * params.RESOLUTION;
+    ptrdiff_t local_size = lNx * params.RESOLUTION;
     int local_count = static_cast<int>(local_size);
 
     std::vector<int> recvcounts(size), displs(size);
@@ -660,18 +661,117 @@ public:
         displs[i] = displs[i - 1] + recvcounts[i - 1];
     }
 
-    std::vector<double> phi_global;
+    std::vector<double> lphi_global;
     if (rank == 0)
-      phi_global.resize(params.RESOLUTION * params.RESOLUTION);
+      lphi_global.resize(params.RESOLUTION * params.RESOLUTION);
 
-    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, phi_global.data(),
+    MPI_Gatherv(lphi, local_count, MPI_DOUBLE, lphi_global.data(),
                 recvcounts.data(), displs.data(), MPI_DOUBLE, 0, comm);
 
     if (rank == 0) {
-      MPI_Send(phi_global.data(), phi_global.size(), MPI_DOUBLE, 0, 0,
+      MPI_Send(lphi_global.data(), lphi_global.size(), MPI_DOUBLE, 0, 0,
                MPI_COMM_WORLD);
     }
 
+    return {};
+  }
+
+  /* -------------------------------------------------------------------- *
+     Gather the complex Fourier texture  φ̂(k)=lrhok  onto world‑rank 0.
+     –  Each compute rank owns   lNx × Nyh   complex numbers.
+     –  We first do an MPI_Gatherv inside  “comm”  (the compute communicator)
+        to build the compact (Hermitian‑reduced) array on  comm‑rank 0.
+     –  That rank expands it to the full   Nx × Ny   field, applies
+        the conjugate symmetry, and sends the finished buffer to
+        world‑rank 0, which converts it to  glm::vec2  and returns it.
+     –  All non‑UI ranks return an empty vector.
+     -------------------------------------------------------------------- */
+  std::vector<glm::vec2> gather_rhok() const {
+    constexpr int TAG = 42; // arbitrary but unique tag
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    const int Nx = params.RESOLUTION;
+    const int Ny = params.RESOLUTION;
+    const int Nyh = Ny / 2 + 1;
+
+    /* ------------------------------------------------------------------ *
+       UI / I‑O task (world‑rank 0) : receive final buffer and return it
+       ------------------------------------------------------------------ */
+    if (world_rank == 0) {
+      std::vector<double> full_d(static_cast<std::size_t>(Nx) * Ny * 2);
+      MPI_Recv(full_d.data(),             /* recvbuf */
+               full_d.size(), MPI_DOUBLE, /* count / type */
+               1, TAG, MPI_COMM_WORLD,    /* src = world‑rank 1 */
+               MPI_STATUS_IGNORE);
+
+      std::vector<glm::vec2> full_c(static_cast<std::size_t>(Nx) * Ny);
+      for (std::size_t k = 0; k < full_c.size(); ++k)
+        full_c[k] = glm::vec2(full_d[2 * k], full_d[2 * k + 1]);
+
+      return full_c; // done
+    }
+
+    /* ------------------------------------------------------------------ *
+       All other ranks --------------------------------------------------- */
+    if (comm == MPI_COMM_NULL)
+      return {}; // defensive: world‑rank 0 only
+
+    /* ----- 1.  gather compact slabs → comm‑rank 0 ---------------------- */
+    const ptrdiff_t local_cpx = lNx * Nyh; // complex count
+    const int local_dbl_cnt = static_cast<int>(local_cpx * 2);
+
+    std::vector<int> recvcounts, displs;
+    if (rank == 0)
+      recvcounts.resize(size);
+
+    MPI_Gather(&local_dbl_cnt, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0,
+               comm); // to comm‑rank 0
+
+    if (rank == 0) {
+      displs.resize(size);
+      displs[0] = 0;
+      for (int i = 1; i < size; ++i)
+        displs[i] = displs[i - 1] + recvcounts[i - 1];
+    }
+
+    std::vector<double> compact; // (Nx × Nyh × 2) doubles
+    if (rank == 0)
+      compact.resize(static_cast<std::size_t>(Nx) * Nyh * 2);
+
+    MPI_Gatherv(reinterpret_cast<const double *>(lrhok), local_dbl_cnt,
+                MPI_DOUBLE, compact.data(), recvcounts.data(), displs.data(),
+                MPI_DOUBLE, 0, comm);
+
+    /* ----- 2. comm‑rank 0 : expand Hermitian half --------------------- */
+    if (rank == 0) {
+      std::vector<double> full(static_cast<std::size_t>(Nx) * Ny * 2, 0.0);
+
+      for (int i = 0; i < Nx; ++i) {
+        for (int j = 0; j < Nyh; ++j) {
+          const std::size_t src = static_cast<std::size_t>(i) * Nyh + j;
+          const double re = compact[2 * src];
+          const double im = compact[2 * src + 1];
+
+          /* forward part (j) */
+          std::size_t dst = static_cast<std::size_t>(i) * Ny + j;
+          full[2 * dst] = re;
+          full[2 * dst + 1] = im;
+
+          /* conjugate partner  (Ny - j) — except j=0 or Ny/2 */
+          if (j > 0 && j < Nyh - 1) {
+            dst = static_cast<std::size_t>(i) * Ny + (Ny - j);
+            full[2 * dst] = re;
+            full[2 * dst + 1] = -im;
+          }
+        }
+      }
+
+      /* send full‑sized field to world‑rank 0 (which is not in “comm”) */
+      MPI_Send(full.data(), full.size(), MPI_DOUBLE, 0, TAG, MPI_COMM_WORLD);
+    }
+
+    /* non‑root compute ranks return nothing */
     return {};
   }
 };
