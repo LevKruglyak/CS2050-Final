@@ -1,11 +1,10 @@
-#include "simulation_v2.h"
+#include "simulation.h"
 #include <fftw3.h>
 #include <mpi.h>
 #include <omp.h>
 #include <cmath>
 #include <cstddef>
 #include <random>
-#include "glm/common.hpp"
 
 std::mt19937 thread_rng() {
   int rank;
@@ -25,8 +24,8 @@ void Simulation::generate_particles(seed_density seed) {
   for (int i = 0; i < lNx; ++i) {
     for (int j = 0; j < Ny; ++j) {
       int gi = lx0 + i;
-      double xc = (gi + 0.5) / (double)Nx;
-      double yc = (j + 0.5) / (double)Ny;
+      double xc = (gi + 0.5) * (double)dx;
+      double yc = (j + 0.5) * (double)dy;
       double rho = seed(xc, yc);
 
       rho_values[i * Ny + j] = rho;
@@ -83,7 +82,6 @@ void Simulation::assign_masses() {
 
   std::vector<double> send_left(Ny, 0.0), send_right(Ny, 0.0);
 
-  // precompute once per particle
   int left_edge = (int(lx0) - 1 + int(Nx)) % int(Nx);
   int right_edge = (int(lx0) + int(lNx)) % int(Nx);
 
@@ -104,7 +102,6 @@ void Simulation::assign_masses() {
     for (int di = 0; di <= 1; ++di) {
       int i_glob = (gx + di + Nx) % Nx;
       double wx = (di == 0 ? dx0 : dx1);
-
       bool owned = (i_glob >= lx0 && i_glob < lx0 + lNx);
 
       for (int dj = 0; dj <= 1; ++dj) {
@@ -126,29 +123,30 @@ void Simulation::assign_masses() {
     }
   }
 
-  std::vector<double> recv_left(Ny, 0.0);
-  std::vector<double> recv_right(Ny, 0.0);
+  if (size > 1) {
+    std::vector<double> recv_left(Ny, 0.0), recv_right(Ny, 0.0);
+    int left = (rank == 0 ? size - 1 : rank - 1);
+    int right = (rank == size - 1 ? 0 : rank + 1);
 
-  int left = (rank == 0 ? size - 1 : rank - 1);
-  int right = (rank == size - 1 ? 0 : rank + 1);
+    MPI_Sendrecv(send_left.data(), Ny, MPI_DOUBLE, left, 0, recv_right.data(), Ny, MPI_DOUBLE,
+                 right, 0, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_right.data(), Ny, MPI_DOUBLE, right, 1, recv_left.data(), Ny, MPI_DOUBLE,
+                 left, 1, comm, MPI_STATUS_IGNORE);
 
-  MPI_Sendrecv(send_left.data(), Ny, MPI_DOUBLE, left, 0, recv_right.data(), Ny, MPI_DOUBLE, right,
-               0, comm, MPI_STATUS_IGNORE);
-  MPI_Sendrecv(send_right.data(), Ny, MPI_DOUBLE, right, 1, recv_left.data(), Ny, MPI_DOUBLE, left,
-               1, comm, MPI_STATUS_IGNORE);
+    for (int j = 0; j < Ny; ++j) {
+      rho_ext[1 * Ny + j] += recv_left[j];
+      rho_ext[(lNx)*Ny + j] += recv_right[j];
+    }
 
-  for (int j = 0; j < params.RESOLUTION; ++j) {
-    rho_ext[1 * params.RESOLUTION + j] += recv_left[j];
-    rho_ext[(lNx)*params.RESOLUTION + j] += recv_right[j];
+    MPI_Sendrecv(&rho_ext[lNx * Ny], Ny, MPI_DOUBLE, right, 2, &rho_ext[0], Ny, MPI_DOUBLE, left, 2,
+                 comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&rho_ext[1 * Ny], Ny, MPI_DOUBLE, left, 3, &rho_ext[(lNx + 1) * Ny], Ny,
+                 MPI_DOUBLE, right, 3, comm, MPI_STATUS_IGNORE);
   }
 
-  MPI_Sendrecv(&rho_ext[lNx * Ny], Ny, MPI_DOUBLE, right, 2, &rho_ext[0], Ny, MPI_DOUBLE, left, 2,
-               comm, MPI_STATUS_IGNORE);
-  MPI_Sendrecv(&rho_ext[1 * Ny], Ny, MPI_DOUBLE, left, 3, &rho_ext[(lNx + 1) * Ny], Ny, MPI_DOUBLE,
-               right, 3, comm, MPI_STATUS_IGNORE);
-
-  for (int i = 0; i < lNx; ++i)
+  for (int i = 0; i < lNx; ++i) {
     std::copy_n(&rho_ext[(i + 1) * Ny], Ny, &rho[i * Ny]);
+  }
 }
 
 const MPI_Datatype get_mpi_particle_type() {
@@ -248,7 +246,16 @@ void Simulation::compute_forces() {
   }
 }
 
+// in simulation_v2.h add:
+
+// --------------------------------------------------
+// 1) Modified update_positions():
 void Simulation::update_positions() {
+  const double Lx = Nx * dx;
+  const double Ly = Ny * dy;
+
+  size_t Np = particles.size();
+  move_dir.assign(Np, 0);
 
   if (params.USE_SCALE_FACTOR) {
     double a_old = 1.0 + adot * t;
@@ -257,24 +264,55 @@ void Simulation::update_positions() {
     double H_mid = adot / a_mid;
 
 #pragma omp parallel for
-    for (auto& p : particles) {
+    for (size_t idx = 0; idx < Np; ++idx) {
+      auto& p = particles[idx];
       p.v += (-H_mid * p.v + (1.0 / a_mid) * p.a) * (0.5 * dt);
-      vec2 np = glm::mod(p.p + p.v * dt + p.a * (0.5 * dt * dt), vec2(Lx, Ly));
-      vec2 na = cic_force(np);
+      vec2 raw_p = p.p + p.v * dt + p.a * (0.5 * dt * dt);
+      vec2 na = cic_force(raw_p);
       p.v += (-H_mid * p.v + (1.0 / a_mid) * na) * (0.5 * dt);
 
-      p.p = np;
+      double x_lo = lx0 * dx;
+      double x_hi = (lx0 + lNx) * dx;
+      int dir = 0;
+      if (raw_p.x < x_lo)
+        dir = -1;
+      else if (raw_p.x >= x_hi)
+        dir = +1;
+      move_dir[idx] = dir;
+
+      p.p.x = std::fmod(raw_p.x, Lx);
+      if (p.p.x < 0)
+        p.p.x += Lx;
+      p.p.y = std::fmod(raw_p.y, Ly);
+      if (p.p.y < 0)
+        p.p.y += Ly;
       p.a = na;
     }
+
   } else {
 #pragma omp parallel for
-    for (auto& p : particles) {
+    for (size_t idx = 0; idx < Np; ++idx) {
+      auto& p = particles[idx];
       p.v += p.a * (0.5 * dt);
-      vec2 np = glm::mod(p.p + p.v * dt + p.a * (0.5 * dt * dt), vec2(Lx, Ly));
-      vec2 na = cic_force(np);
+      vec2 raw_p = p.p + p.v * dt + p.a * (0.5 * dt * dt);
+      vec2 na = cic_force(raw_p);
       p.v += na * (0.5 * dt);
 
-      p.p = np;
+      double x_lo = lx0 * dx;
+      double x_hi = (lx0 + lNx) * dx;
+      int dir = 0;
+      if (raw_p.x < x_lo)
+        dir = -1;
+      else if (raw_p.x >= x_hi)
+        dir = +1;
+      move_dir[idx] = dir;
+
+      p.p.x = std::fmod(raw_p.x, Lx);
+      if (p.p.x < 0)
+        p.p.x += Lx;
+      p.p.y = std::fmod(raw_p.y, Ly);
+      if (p.p.y < 0)
+        p.p.y += Ly;
       p.a = na;
     }
   }
@@ -315,6 +353,49 @@ vec2 Simulation::cic_force(vec2 p) {
   }
 
   return interpolated_force;
+}
+
+void Simulation::reassign_particles() {
+  if (size == 1)
+    return;
+
+  int left = (rank == 0 ? size - 1 : rank - 1);
+  int right = (rank == size - 1 ? 0 : rank + 1);
+  auto mpiP = get_mpi_particle_type();
+
+  std::vector<Particle> send_left, send_right, keep;
+  keep.reserve(particles.size());
+
+  for (size_t i = 0; i < particles.size(); ++i) {
+    switch (move_dir[i]) {
+      case -1:
+        send_left.push_back(particles[i]);
+        break;
+      case +1:
+        send_right.push_back(particles[i]);
+        break;
+      default:
+        keep.push_back(particles[i]);
+        break;
+    }
+  }
+
+  int nL = send_left.size(), nR = send_right.size();
+  int rL = 0, rR = 0;
+  MPI_Sendrecv(&nL, 1, MPI_INT, left, 0, &rR, 1, MPI_INT, right, 0, comm, MPI_STATUS_IGNORE);
+  MPI_Sendrecv(&nR, 1, MPI_INT, right, 1, &rL, 1, MPI_INT, left, 1, comm, MPI_STATUS_IGNORE);
+
+  std::vector<Particle> recv_left(rL), recv_right(rR);
+  MPI_Sendrecv(send_left.data(), nL, mpiP, left, 2, recv_right.data(), rR, mpiP, right, 2, comm,
+               MPI_STATUS_IGNORE);
+  MPI_Sendrecv(send_right.data(), nR, mpiP, right, 3, recv_left.data(), rL, mpiP, left, 3, comm,
+               MPI_STATUS_IGNORE);
+
+  particles.swap(keep);
+  particles.insert(particles.end(), recv_left.begin(), recv_left.end());
+  particles.insert(particles.end(), recv_right.begin(), recv_right.end());
+
+  move_dir.clear();
 }
 
 std::vector<Particle> Simulation::gather_particles() const {
