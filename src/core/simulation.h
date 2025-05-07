@@ -71,6 +71,8 @@ class Simulation {
 
   std::vector<Particle> particles;
   std::vector<int> move_dir;  // particle move direction list for reassignment
+  std::vector<vec2> ff_left_halo;
+  std::vector<vec2> ff_right_halo;
 
  public:
   Simulation(Params params) : params(params) {
@@ -106,6 +108,8 @@ class Simulation {
       rho = std::vector<double>(lNx * Ny, 0.0);
       rho_ext = std::vector<double>((lNx + 2) * Ny, 0.0);
       ff = std::vector<vec2>(lNx * Ny, vec2(0.0));
+      ff_left_halo = std::vector<vec2>(Ny, vec2(0.0));
+      ff_right_halo = std::vector<vec2>(Ny, vec2(0.0));
 
       const siv::PerlinNoise::seed_type seed = 123456u;
       const siv::PerlinNoise perlin{seed};

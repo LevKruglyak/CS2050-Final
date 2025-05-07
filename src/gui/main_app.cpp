@@ -19,7 +19,6 @@ enum class Command : int {
   DeleteSim,
   Step,
   GatherRho,
-  GatherFF,
   Shutdown,
 };
 
@@ -68,24 +67,11 @@ class SimulationCached : public Simulation {
             density_hdr(globalDensity[i * params.RESOLUTION + j]);
       }
     }
-
-    broadcast_command(Command::GatherFF);
-    auto globalFF = gather_ff();
-    ffTextureData.reserve(params.RESOLUTION * params.RESOLUTION * 3);
-#pragma omp parallel for collapse(2)
-    for (int i = 0; i < params.RESOLUTION; i++) {
-      for (int j = 0; j < params.RESOLUTION; j++) {
-        glm::vec3 color = complexColour(globalFF[j * params.RESOLUTION + i]);
-
-        ffTextureData[(i * params.RESOLUTION + j) * 3 + 0] = color.x;
-        ffTextureData[(i * params.RESOLUTION + j) * 3 + 1] = color.y;
-        ffTextureData[(i * params.RESOLUTION + j) * 3 + 2] = color.z;
-      }
-    }
   }
 
   void init_textures() {
     load_textures();
+
     glGenTextures(1, &densityTexture);
     glBindTexture(GL_TEXTURE_2D, densityTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED,
@@ -96,13 +82,6 @@ class SimulationCached : public Simulation {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
-
-    glGenTextures(1, &ffTexture);
-    glBindTexture(GL_TEXTURE_2D, ffTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RGB,
-                 GL_FLOAT, ffTextureData.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   }
 
   void sync_textures() {
@@ -110,24 +89,11 @@ class SimulationCached : public Simulation {
 
     glBindTexture(GL_TEXTURE_2D, densityTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Nx, Ny, GL_RED, GL_FLOAT, densityTextureData.data());
-
-    glBindTexture(GL_TEXTURE_2D, ffTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, params.RESOLUTION, params.RESOLUTION, GL_RGB, GL_FLOAT,
-                    ffTextureData.data());
   }
 
  public:
   GLuint densityTexture;
   std::vector<float> densityTextureData;
-
-  GLuint densitykTexture;
-  std::vector<float> densitykTextureData;
-
-  GLuint phiTexture;
-  std::vector<float> phiTextureData;
-
-  GLuint ffTexture;
-  std::vector<float> ffTextureData;
 
   SimulationCached(Params params) : Simulation(params) { init_textures(); }
   void sync() { sync_textures(); }
@@ -135,29 +101,25 @@ class SimulationCached : public Simulation {
 
 class App {
   bool busy = false;
-  float particle_radius = 0.5;
-  ImVec4 particle_color = ImVec4(1.0, 1.0, 1.0, 1.0);
-
   std::unique_ptr<SimulationCached> simulation = nullptr;
   Simulation::Params params;
 
   void viewport_gui() {
     ImGui::Begin("Viewport");
     if (ImPlot::BeginPlot("Viewport", ImVec2(-1.0, -1.0),
-                          ImPlotFlags_Equal | ImPlotFlags_NoTitle)) {
+                          ImPlotFlags_Equal | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
       ImPlot::SetupAxes("", "");
       float hr = params.RADIUS / 2.0;
 
       if (simulation != nullptr) {
-        ImPlot::PlotImage("ff", simulation->ffTexture, ImPlotPoint(-hr, -hr), ImPlotPoint(hr, hr));
-        ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(-hr, -hr),
+        ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(0, 0),
                           ImPlotPoint(hr, hr));
       }
 
       ImPlot::PushPlotClipRect();
       // Draw the bounds
       ImDrawList* draw_list = ImPlot::GetPlotDrawList();
-      ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(-hr, -hr));
+      ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(0, 0));
       ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(hr, hr));
       ImU32 col = ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
 
@@ -171,11 +133,6 @@ class App {
 
   void simulation_params_gui() {
     ImGui::Begin("Settings");
-    if (ImGui::CollapsingHeader("Viewport Controls")) {
-      ImGui::ColorEdit4("Particle Color", (float*)&particle_color);
-      ImGui::SliderFloat("Particle Radius", &particle_radius, 0.01, 10.0);
-    }
-
     ImGui::BeginDisabled(simulation != nullptr);
     ImGui::SeparatorText("Phyiscal Paramters");
     ImGui::InputFloat("Gravitational Constant", &params.GRAVITY, 0.0f, 0.0f, "%.3f",
@@ -234,17 +191,19 @@ class App {
       busy = true;
     }
 
-    static float done = 0.0;
+    static float progress = 0.0;
     MPI_Status st;
     int flag;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &st);
 
     if (st.MPI_TAG == TAG_PROGRESS) {
-      MPI_Recv(&done, 1, MPI_FLOAT, st.MPI_SOURCE, TAG_PROGRESS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(&progress, 1, MPI_FLOAT, st.MPI_SOURCE, TAG_PROGRESS, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
     } else if (st.MPI_TAG == TAG_DONE) {
       char dummy;
       MPI_Recv(&dummy, 1, MPI_BYTE, st.MPI_SOURCE, TAG_DONE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       busy = false;
+      progress = 0.0;
 
       simulation->sync();
     }
@@ -257,7 +216,7 @@ class App {
     ImGui::EndDisabled();
 
     if (busy) {
-      ImGui::ProgressBar(done, ImVec2(385, 0));
+      ImGui::ProgressBar(progress, ImVec2(385, 0));
     }
 
     ImGui::SeparatorText("Information");
@@ -328,9 +287,6 @@ void worker_loop() {
         break;
       case Command::GatherRho:
         sim->gather_rho();
-        break;
-      case Command::GatherFF:
-        sim->gather_ff();
         break;
       case Command::Shutdown:
         return;

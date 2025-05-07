@@ -244,12 +244,28 @@ void Simulation::compute_forces() {
       ff[idx] = vec2(-fx, -fy);
     }
   }
+
+  // Exchange force halos (for accurate CIC)
+  if (size != 1) {
+    ff_left_halo.resize(Ny);
+    ff_right_halo.resize(Ny);
+
+    int left = (rank == 0 ? size - 1 : rank - 1);
+    int right = (rank == size - 1 ? 0 : rank + 1);
+
+    std::vector<vec2> send_left(Ny), send_right(Ny);
+    for (int j = 0; j < Ny; ++j) {
+      send_left[j] = ff[j];
+      send_right[j] = ff[(lNx - 1) * Ny + j];
+    }
+
+    MPI_Sendrecv(send_left.data(), Ny * 2, MPI_DOUBLE, left, 0, ff_right_halo.data(), Ny * 2,
+                 MPI_DOUBLE, right, 0, comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(send_right.data(), Ny * 2, MPI_DOUBLE, right, 1, ff_left_halo.data(), Ny * 2,
+                 MPI_DOUBLE, left, 1, comm, MPI_STATUS_IGNORE);
+  }
 }
 
-// in simulation_v2.h add:
-
-// --------------------------------------------------
-// 1) Modified update_positions():
 void Simulation::update_positions() {
   const double Lx = Nx * dx;
   const double Ly = Ny * dy;
@@ -319,36 +335,45 @@ void Simulation::update_positions() {
 }
 
 vec2 Simulation::cic_force(vec2 p) {
-  double fx = std::fmod(p.x / dx, (double)Nx);
-  double fy = std::fmod(p.y / dy, (double)Ny);
+  double fx = std::fmod(p.x / dx, double(Nx));
+  double fy = std::fmod(p.y / dy, double(Ny));
   if (fx < 0)
     fx += Nx;
   if (fy < 0)
-    fy += Nx;
+    fy += Ny;
 
-  int gx = (int)std::floor(fx);
-  int gy = (int)std::floor(fy);
+  int gx = int(std::floor(fx));
+  int gy = int(std::floor(fy));
 
   double dx1 = fx - gx, dx0 = 1.0 - dx1;
   double dy1 = fy - gy, dy0 = 1.0 - dy1;
 
-  vec2 interpolated_force = vec2(0.0);
+  vec2 interpolated_force(0.0);
+
+  int left_edge = (int(lx0) - 1 + int(Nx)) % int(Nx);
+  int right_edge = (int(lx0) + int(lNx)) % int(Nx);
 
   for (int di = 0; di <= 1; ++di) {
-    int i_glob = (gx + di) % params.RESOLUTION;
+    int i_glob = (gx + di) % Nx;
     bool owned = (i_glob >= lx0) && (i_glob < lx0 + lNx);
 
-    if (!owned)
-      continue;  // TODO: borrow this data from neighboring strips
-
     int lx = i_glob - lx0;
+    const vec2* col = nullptr;
+
+    if (owned) {
+      col = &ff[lx * Ny];
+    } else if (i_glob == left_edge) {
+      col = ff_left_halo.data();
+    } else if (i_glob == right_edge) {
+      col = ff_right_halo.data();
+    } else {
+      continue;
+    }
 
     for (int dj = 0; dj <= 1; ++dj) {
-      int j_glob = (gy + dj) % params.RESOLUTION;
+      int j_glob = (gy + dj) % Ny;
       double weight = (di == 0 ? dx0 : dx1) * (dj == 0 ? dy0 : dy1);
-
-      std::ptrdiff_t idx = lx * params.RESOLUTION + j_glob;
-      interpolated_force += weight * ff[idx];
+      interpolated_force += weight * col[j_glob];
     }
   }
 
