@@ -4,11 +4,11 @@
 #include <mpi.h>
 #include <omp.h>
 
+#include <perlin.h>
 #include <cstddef>
 #include <functional>
 #include <vector>
 #include "common.h"
-#include "perlin.h"
 
 class Simulation {
  public:
