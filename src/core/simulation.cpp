@@ -186,10 +186,10 @@ void Simulation::compute_forces() {
   double scale = 4 * M_PI * params.GRAVITY * (a * a);
 #pragma omp parallel for collapse(2)
   for (ptrdiff_t i = 0; i < lNx; ++i) {
-    int gi = int(lx0 + i);
-    int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
-
     for (ptrdiff_t j = 0; j < Ny; ++j) {
+      // Weird compilation issue on compute cluster if this is put outside the inner loop
+      int gi = int(lx0 + i);
+      int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
       int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
       size_t idx = size_t(i) * size_t(Ny) + size_t(j);
 

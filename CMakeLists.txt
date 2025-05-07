@@ -38,7 +38,6 @@ list(APPEND LIBRARIES nlohmann_json::nlohmann_json)
 # Perlin noise
 FetchContent_Declare(perlin GIT_REPOSITORY https://github.com/Reputeless/PerlinNoise.git GIT_TAG v3.0.0)
 FetchContent_MakeAvailable(perlin)
-list(APPEND INCLUDES ${perlin_SOURCE_DIR})
 
 # OpenMP library 
 find_package(OpenMP REQUIRED)
@@ -48,18 +47,11 @@ list(APPEND LIBRARIES OpenMP::OpenMP_CXX)
 find_package(MPI REQUIRED)
 list(APPEND LIBRARIES MPI::MPI_CXX)
 
-find_package(Threads REQUIRED)
-list(APPEND LIBRARIES Threads::Threads)
-
 # FFTW library
-set(ENABLE_DOUBLE    ON CACHE BOOL "Build double‐precision FFTW"        FORCE)
-set(ENABLE_THREADS   ON CACHE BOOL "Enable FFTW threading API"          FORCE)
-set(ENABLE_OPENMP    ON CACHE BOOL "Enable FFTW OpenMP support"         FORCE)
-set(ENABLE_MPI       ON CACHE BOOL "Enable FFTW MPI support"            FORCE)
-option(BUILD_SHARED_LIBS "Build shared FFTW libraries" ON)
-
-FetchContent_Declare(fftw GIT_REPOSITORY https://github.com/FFTW/fftw3.git GIT_TAG master)
-FetchContent_MakeAvailable(fftw)
+FetchContent_Declare(findfftw GIT_REPOSITORY https://github.com/egpbos/findFFTW.git GIT_TAG master)
+FetchContent_MakeAvailable(findfftw)
+list(APPEND CMAKE_MODULE_PATH "${findfftw_SOURCE_DIR}")
+find_package(FFTW REQUIRED COMPONENTS DOUBLE_LIB DOUBLE_OPENMP_LIB DOUBLE_MPI_LIB)
 list(APPEND LIBRARIES ${FFTW_DOUBLE_LIB} ${FFTW_DOUBLE_OPENMP_LIB} ${FFTW_DOUBLE_MPI_LIB})
 
 # CLI executable
