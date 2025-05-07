@@ -1,7 +1,5 @@
 #include "simulation.h"
-#include <fftw3.h>
-#include <mpi.h>
-#include <omp.h>
+
 #include <cmath>
 #include <cstddef>
 #include <random>
@@ -43,7 +41,10 @@ void Simulation::generate_particles(seed_density seed) {
   {
     std::mt19937 rng = thread_rng();
     std::uniform_real_distribution<double> u(0.0, 1.0);
+    std::poisson_distribution<int> poisson(params.PARTICLES_PER_CELL);
+
     int tid = omp_get_thread_num();
+    thread_particles[tid].reserve(lNx * Ny * params.PARTICLES_PER_CELL / size);
 
 #pragma omp for collapse(2) nowait
     for (int i = 0; i < lNx; ++i) {
@@ -55,9 +56,7 @@ void Simulation::generate_particles(seed_density seed) {
         double rho = rho_values[i * Ny + j];
         double cell_mass = rho * mass_per_density;
 
-        std::poisson_distribution<int> poisson(params.PARTICLES_PER_CELL);
         int n_particles = poisson(rng);
-
         if (n_particles == 0)
           continue;
 
@@ -183,49 +182,28 @@ void Simulation::compute_forces() {
   // Forward FFT
   fftw_execute(fplan);
 
-  // Invert Laplacian in Fourier space
+  // Invert Laplacian and compute spectral gradients
   double scale = 4 * M_PI * params.GRAVITY * (a * a);
 #pragma omp parallel for collapse(2)
   for (ptrdiff_t i = 0; i < lNx; ++i) {
     int gi = int(lx0 + i);
     int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
-    for (ptrdiff_t j = 0; j < Ny; ++j) {
-      int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
-      size_t idx = size_t(i) * size_t(Ny) + size_t(j);
-      double k2 = double(kx * kx + ky * ky);
-      if (k2 < 1e-14) {
-        scratch_k[idx][0] = 0.0;
-        scratch_k[idx][1] = 0.0;
-      } else {
-        double s = scale / (k2 + params.SOFTENING * params.SOFTENING);
-        scratch_k[idx][0] *= s;
-        scratch_k[idx][1] *= s;
-      }
-    }
-  }
-
-  // Compute spectral gradients
-#pragma omp parallel for collapse(2)
-  for (ptrdiff_t i = 0; i < lNx; ++i) {
-    int gi = int(lx0 + i);
-    int kx = (gi <= int(Nx / 2) ? gi : gi - int(Nx));
 
     for (ptrdiff_t j = 0; j < Ny; ++j) {
       int ky = (j <= Ny / 2 ? int(j) : int(j) - int(Ny));
       size_t idx = size_t(i) * size_t(Ny) + size_t(j);
 
+      double k2 = double(kx * kx + ky * ky) + params.SOFTENING * params.SOFTENING;
       double re = scratch_k[idx][0];
       double im = scratch_k[idx][1];
+
+      re *= (k2 == 0) ? 0.0 : scale / k2;
+      im *= (k2 == 0) ? 0.0 : scale / k2;
 
       xgrad[idx][0] = kx * im;
       xgrad[idx][1] = -kx * re;
       ygrad[idx][0] = ky * im;
       ygrad[idx][1] = -ky * re;
-
-      assert(!isnan(xgrad[idx][0]));
-      assert(!isnan(xgrad[idx][1]));
-      assert(!isnan(ygrad[idx][0]));
-      assert(!isnan(ygrad[idx][1]));
     }
   }
 

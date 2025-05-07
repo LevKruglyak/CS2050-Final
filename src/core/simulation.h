@@ -2,6 +2,8 @@
 
 #include <fftw3-mpi.h>
 #include <mpi.h>
+#include <omp.h>
+
 #include <cstddef>
 #include <functional>
 #include <vector>
@@ -101,6 +103,8 @@ class Simulation {
       scratch_k = fftw_alloc_complex(lalloc);
       xgrad = fftw_alloc_complex(lalloc);
       ygrad = fftw_alloc_complex(lalloc);
+
+      fftw_plan_with_nthreads(omp_get_num_threads());
       fplan = fftw_mpi_plan_dft_2d(Nx, Ny, scratch_k, scratch_k, comm, FFTW_FORWARD, FFTW_MEASURE);
       bxplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, xgrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
       byplan = fftw_mpi_plan_dft_2d(Nx, Ny, ygrad, ygrad, comm, FFTW_BACKWARD, FFTW_MEASURE);

@@ -5,6 +5,7 @@
 #include "implot/implot_internal.h"
 #include "simulation.h"
 
+#include <fftw3.h>
 #include <mpi.h>
 #include <algorithm>
 #include <memory>
@@ -297,7 +298,10 @@ void worker_loop() {
 }
 
 int main(int argc, char** argv) {
-  MPI_Init(&argc, &argv);
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+  fftw_mpi_init();
+  fftw_init_threads();
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -331,6 +335,7 @@ int main(int argc, char** argv) {
     worker_loop();
   }
 
+  fftw_cleanup_threads();
   MPI_Finalize();
   return 0;
 }
