@@ -30,13 +30,19 @@ void broadcast_command(Command cmd) {
 class SimulationCached : public Simulation {
   void sync_particles() {
     broadcast_command(Command::GatherParticles);
-    particles = gather_particles();
-    x_data.reserve(particles.size());
-    y_data.reserve(particles.size());
-    for (uint i = 0; i < particles.size(); i++) {
-      x_data[i] = particles[i].p.x - params.RADIUS / 2;
-      y_data[i] = particles[i].p.y - params.RADIUS / 2;
+    cached_particles = gather_particles();
+    x_data.reserve(cached_particles.size());
+    y_data.reserve(cached_particles.size());
+    for (uint i = 0; i < cached_particles.size(); i++) {
+      x_data[i] = cached_particles[i].p.x - params.RADIUS / 2;
+      y_data[i] = cached_particles[i].p.y - params.RADIUS / 2;
     }
+  }
+
+  float density_hdr(float input) {
+    input *= (0.3 * params.RADIUS * params.RADIUS / params.MASS);
+    // now mostly < 1
+    return 1.0 - exp(-input * 3.0);
   }
 
   void load_textures() {
@@ -46,7 +52,8 @@ class SimulationCached : public Simulation {
 #pragma omp parallel for collapse(2)
     for (int i = 0; i < params.RESOLUTION; i++) {
       for (int j = 0; j < params.RESOLUTION; j++) {
-        densityTextureData[i * params.RESOLUTION + j] = globalDensity[i * params.RESOLUTION + j];
+        densityTextureData[i * params.RESOLUTION + j] =
+            density_hdr(globalDensity[i * params.RESOLUTION + j]);
       }
     }
 
@@ -160,7 +167,7 @@ class SimulationCached : public Simulation {
   GLuint ffTexture;
   std::vector<float> ffTextureData;
 
-  std::vector<Particle> particles;
+  std::vector<Particle> cached_particles;
   std::vector<double> x_data = {};
   std::vector<double> y_data = {};
 
@@ -187,29 +194,29 @@ class App {
     if (ImPlot::BeginPlot("Viewport", ImVec2(-1.0, -1.0),
                           ImPlotFlags_Equal | ImPlotFlags_NoTitle)) {
       ImPlot::SetupAxes("", "");
+      float hr = params.RADIUS / 2.0;
 
       if (simulation != nullptr) {
-        float hr = params.RADIUS / 2.0;
 
         ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(-hr, -hr),
                           ImPlotPoint(hr, hr));
         ImPlot::PlotImage("ff", simulation->ffTexture, ImPlotPoint(-hr, -hr), ImPlotPoint(hr, hr));
 
-        // Draw the bounds
-        if (ImPlot::BeginItem("bounds", 0)) {
-          ImDrawList* draw_list = ImPlot::GetPlotDrawList();
-          ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(-hr, -hr));
-          ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(hr, hr));
-          draw_list->AddRect(p_min, p_max, ImPlot::GetCurrentItem()->Color, 0.0f, 0, 2.0f);
-          ImPlot::EndItem();
-        }
-
-        // Draw the particles
-        ImPlot::GetStyle().MarkerSize = particle_radius;
-        ImPlot::SetNextLineStyle(particle_color);
-        ImPlot::PlotScatter("particles", simulation->x_data.data(), simulation->y_data.data(),
-                            simulation->particles.size());
+        // // Draw the particles
+        // ImPlot::GetStyle().MarkerSize = particle_radius;
+        // ImPlot::SetNextLineStyle(particle_color);
+        // ImPlot::PlotScatter("particles", simulation->x_data.data(), simulation->y_data.data(),
+        //                     std::min(simulation->cached_particles.size(), (size_t)100000));
       }
+
+      ImPlot::PushPlotClipRect();
+      // Draw the bounds
+      ImDrawList* draw_list = ImPlot::GetPlotDrawList();
+      ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(-hr, -hr));
+      ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(hr, hr));
+      ImU32 col = IM_COL32(80, 150, 80, 255);
+      draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 2.0f);
+      ImPlot::PopPlotClipRect();
 
       ImPlot::EndPlot();
     }
@@ -225,15 +232,17 @@ class App {
 
     if (ImGui::CollapsingHeader("Simulation Controls")) {
       ImGui::BeginDisabled(simulation != nullptr);
-      ImGui::SliderFloat("Gravitational Constant", &params.GRAVITY, 1e-4, 1e4, "%e",
-                         ImGuiSliderFlags_Logarithmic);
-      ImGui::SliderFloat("Universe Radius", &params.RADIUS, 1, 1000, "%e");
-      ImGui::SliderFloat("Universe Mass", &params.MASS, 1e-4, 1e4, "%e",
-                         ImGuiSliderFlags_Logarithmic);
-      ImGui::SliderFloat("Integration Timestep", &params.TIMESTEP, 1e-4, 1e4, "%e",
-                         ImGuiSliderFlags_Logarithmic);
-      ImGui::SliderFloat("Gravitational Softening", &params.SOFTENING, 1e-4, 1e4, "%e",
-                         ImGuiSliderFlags_Logarithmic);
+      ImGui::InputFloat("Gravitational Constant", &params.GRAVITY, 0.0f, 0.0f, "%.6e",
+                        ImGuiInputTextFlags_CharsScientific);
+      ImGui::InputFloat("Universe Radius", &params.RADIUS, 0.0f, 0.0f, "%.6e",
+                        ImGuiInputTextFlags_CharsScientific);
+      ImGui::InputFloat("Universe Mass", &params.MASS, 0.0f, 0.0f, "%.6e",
+                        ImGuiInputTextFlags_CharsScientific);
+      ImGui::InputFloat("Integration Timestep", &params.TIMESTEP, 0.0f, 0.0f, "%e",
+                        ImGuiInputTextFlags_CharsScientific);
+      ImGui::InputFloat("Gravitational Softening", &params.SOFTENING, 0.0f, 0.0f, "%e",
+                        ImGuiInputTextFlags_CharsScientific);
+      ImGui::Checkbox("Evolve Scale Factor", &params.USE_SCALE_FACTOR);
       int resolution = params.RESOLUTION;
       ImGui::SliderInt("Density Texture Resolution", &resolution, 32, 4096);
       params.RESOLUTION = resolution;
@@ -252,9 +261,33 @@ class App {
         broadcast_command(Command::DeleteSim);
       }
 
-      if (simulation && ImGui::Button("Update")) {
-        broadcast_command(Command::Step);
-        simulation->sync();
+      if (simulation) {
+        static int num_iterations = 1;
+        ImGui::SliderInt("Number of Iterations", &num_iterations, 1, 10000);
+
+        if (ImGui::Button("Update")) {
+
+          broadcast_command(Command::Step);
+          for (int i = 0; i < num_iterations; ++i) {
+            simulation->timestep();
+          }
+          MPI_Bcast(&num_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
+          MPI_Barrier(MPI_COMM_WORLD);
+          simulation->sync();
+        }
+      }
+    }
+
+    if (simulation) {
+      if (ImGui::CollapsingHeader("Simulation Observables")) {
+        ImGui::LabelText("number of particles", "%.2e",
+                         (double)simulation->cached_particles.size());
+        if (params.USE_SCALE_FACTOR) {
+          ImGui::LabelText("elapsed time", "%e", simulation->t);
+          ImGui::LabelText("scale factor", "%e", simulation->a + simulation->t * simulation->adot);
+          ImGui::LabelText("Hubble factor", "%e",
+                           simulation->adot / (simulation->a + simulation->t * simulation->adot));
+        }
       }
     }
 
@@ -265,6 +298,7 @@ class App {
   App() {}
 
   void init() {}
+
   void gui() {
     ImGui::DockSpaceOverViewport(ImGui::GetMainViewport()->ID);
 
@@ -291,9 +325,13 @@ void worker_loop() {
         sim = nullptr;
         break;
       case Command::Step:
+        int num_iterations;
+        MPI_Bcast(&num_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
         if (sim) {
-          sim->timestep();
+          for (int i = 0; i < num_iterations; i++)
+            sim->timestep();
         }
+        MPI_Barrier(MPI_COMM_WORLD);
 
         break;
       case Command::GatherRho:

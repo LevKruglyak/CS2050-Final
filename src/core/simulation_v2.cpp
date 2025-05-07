@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <random>
+#include "glm/common.hpp"
 
 std::mt19937 thread_rng() {
   int rank;
@@ -24,8 +25,8 @@ void Simulation::generate_particles(seed_density seed) {
   for (int i = 0; i < lNx; ++i) {
     for (int j = 0; j < Ny; ++j) {
       int gi = lx0 + i;
-      double xc = (gi + 0.5) * dx;
-      double yc = (j + 0.5) * dy;
+      double xc = (gi + 0.5) / (double)Nx;
+      double yc = (j + 0.5) / (double)Ny;
       double rho = seed(xc, yc);
 
       rho_values[i * Ny + j] = rho;
@@ -185,7 +186,7 @@ void Simulation::compute_forces() {
   fftw_execute(fplan);
 
   // Invert Laplacian in Fourier space
-  double scale = 4 * M_PI * params.GRAVITY;
+  double scale = 4 * M_PI * params.GRAVITY * (a * a);
 #pragma omp parallel for collapse(2)
   for (ptrdiff_t i = 0; i < lNx; ++i) {
     int gi = int(lx0 + i);
@@ -198,7 +199,7 @@ void Simulation::compute_forces() {
         scratch_k[idx][0] = 0.0;
         scratch_k[idx][1] = 0.0;
       } else {
-        double s = scale / k2;
+        double s = scale / (k2 + params.SOFTENING * params.SOFTENING);
         scratch_k[idx][0] *= s;
         scratch_k[idx][1] *= s;
       }
@@ -218,10 +219,10 @@ void Simulation::compute_forces() {
       double re = scratch_k[idx][0];
       double im = scratch_k[idx][1];
 
-      xgrad[idx][0] = -kx * im;
-      xgrad[idx][1] = kx * re;
-      ygrad[idx][0] = -ky * im;
-      ygrad[idx][1] = ky * re;
+      xgrad[idx][0] = kx * im;
+      xgrad[idx][1] = -kx * re;
+      ygrad[idx][0] = ky * im;
+      ygrad[idx][1] = -ky * re;
 
       assert(!isnan(xgrad[idx][0]));
       assert(!isnan(xgrad[idx][1]));
@@ -245,6 +246,75 @@ void Simulation::compute_forces() {
       ff[idx] = vec2(-fx, -fy);
     }
   }
+}
+
+void Simulation::update_positions() {
+
+  if (params.USE_SCALE_FACTOR) {
+    double a_old = 1.0 + adot * t;
+    double a_new = 1.0 + adot * (t + dt);
+    double a_mid = 0.5 * (a_old + a_new);
+    double H_mid = adot / a_mid;
+
+#pragma omp parallel for
+    for (auto& p : particles) {
+      p.v += (-H_mid * p.v + (1.0 / a_mid) * p.a) * (0.5 * dt);
+      vec2 np = glm::mod(p.p + p.v * dt + p.a * (0.5 * dt * dt), vec2(Lx, Ly));
+      vec2 na = cic_force(np);
+      p.v += (-H_mid * p.v + (1.0 / a_mid) * na) * (0.5 * dt);
+
+      p.p = np;
+      p.a = na;
+    }
+  } else {
+#pragma omp parallel for
+    for (auto& p : particles) {
+      p.v += p.a * (0.5 * dt);
+      vec2 np = glm::mod(p.p + p.v * dt + p.a * (0.5 * dt * dt), vec2(Lx, Ly));
+      vec2 na = cic_force(np);
+      p.v += na * (0.5 * dt);
+
+      p.p = np;
+      p.a = na;
+    }
+  }
+}
+
+vec2 Simulation::cic_force(vec2 p) {
+  double fx = std::fmod(p.x / dx, (double)Nx);
+  double fy = std::fmod(p.y / dy, (double)Ny);
+  if (fx < 0)
+    fx += Nx;
+  if (fy < 0)
+    fy += Nx;
+
+  int gx = (int)std::floor(fx);
+  int gy = (int)std::floor(fy);
+
+  double dx1 = fx - gx, dx0 = 1.0 - dx1;
+  double dy1 = fy - gy, dy0 = 1.0 - dy1;
+
+  vec2 interpolated_force = vec2(0.0);
+
+  for (int di = 0; di <= 1; ++di) {
+    int i_glob = (gx + di) % params.RESOLUTION;
+    bool owned = (i_glob >= lx0) && (i_glob < lx0 + lNx);
+
+    if (!owned)
+      continue;  // TODO: borrow this data from neighboring strips
+
+    int lx = i_glob - lx0;
+
+    for (int dj = 0; dj <= 1; ++dj) {
+      int j_glob = (gy + dj) % params.RESOLUTION;
+      double weight = (di == 0 ? dx0 : dx1) * (dj == 0 ? dy0 : dy1);
+
+      std::ptrdiff_t idx = lx * params.RESOLUTION + j_glob;
+      interpolated_force += weight * ff[idx];
+    }
+  }
+
+  return interpolated_force;
 }
 
 std::vector<Particle> Simulation::gather_particles() const {

@@ -14,19 +14,22 @@ class Simulation {
     return 1.0;
   };
   inline static const seed_density seed_gaussian = [](double x, double y) {
-    constexpr double sigma = 0.5;
+    x -= 0.5;
+    y -= 0.5;
+    constexpr double sigma = 0.05;
     constexpr double norm = 1.0 / (2.0 * M_PI * sigma * sigma);
     return norm * std::exp(-(x * x + y * y) / (2.0 * sigma * sigma));
   };
 
   struct Params {
-    float GRAVITY = 0.01;          // Gravitational constant
-    float SOFTENING = 0.001;       // Softening length
-    float TIMESTEP = 0.01;         // Integration timestep
-    float RADIUS = 10.0;           // Periodic boundary condition radius
-    float MASS = 50.0;             // Total mass of the universe
-    float PARTICLES_PER_CELL = 4;  // Total number of particles
-    ptrdiff_t RESOLUTION = 1024;   // Resolution for density texture
+    float GRAVITY = 1.0;           // Gravitational constant
+    float SOFTENING = 0.2;         // Softening length
+    float TIMESTEP = 0.014;        // Integration timestep
+    float RADIUS = 1.0;            // Periodic boundary condition radius
+    float MASS = 1.0;              // Total mass of the universe
+    float PARTICLES_PER_CELL = 8;  // Total number of particles
+    bool USE_SCALE_FACTOR = false;
+    ptrdiff_t RESOLUTION = 1024;  // Resolution for density texture
   };
 
   Params params;
@@ -52,6 +55,14 @@ class Simulation {
 
   std::vector<vec2> ff;  // force field
 
+  double a = 1.0;     // scale factor
+  double H = 0.0;     // scale factor
+  double adot = 0.0;  // scale factor time derivative
+  double rho0 = 0.0;  // mean density at a=1
+
+  double t = 0.0;
+  double dt = 0.0;
+
   std::vector<Particle> particles;
 
  public:
@@ -62,6 +73,11 @@ class Simulation {
     Ly = params.RADIUS;
     dx = (double)Lx / Nx;
     dy = (double)Ly / Ny;
+    dt = params.TIMESTEP;
+
+    rho0 = params.MASS / (Lx * Ly);
+    adot = std::sqrt(8.0 * M_PI * params.GRAVITY * rho0);
+    H = adot / a;
 
     MPI_Comm_rank(MPI_COMM_WORLD, &wrank);
     MPI_Comm_size(MPI_COMM_WORLD, &wsize);
@@ -91,10 +107,13 @@ class Simulation {
   }
 
   void timestep() {
-    if (wrank == 0)
-      return;
+    if (wrank != 0) {
+      update_positions();
+      assign_masses();
+      compute_forces();
+    }
 
-    compute_forces();
+    t += dt;
   }
 
   ~Simulation() {
@@ -117,4 +136,7 @@ class Simulation {
   void generate_particles(seed_density seed);
   void assign_masses();
   void compute_forces();
+  void update_positions();
+
+  vec2 cic_force(vec2 p);
 };
