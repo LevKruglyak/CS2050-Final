@@ -35,9 +35,14 @@ FetchContent_Declare(nlohmann_json GIT_REPOSITORY https://github.com/nlohmann/js
 FetchContent_MakeAvailable(nlohmann_json)
 list(APPEND LIBRARIES nlohmann_json::nlohmann_json)
 
-# Perlin noise
+# Perlin noise library
 FetchContent_Declare(perlin GIT_REPOSITORY https://github.com/Reputeless/PerlinNoise.git GIT_TAG v3.0.0)
 FetchContent_MakeAvailable(perlin)
+
+# stb library
+FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git GIT_TAG master)
+FetchContent_MakeAvailable(stb)
+list(APPEND INCLUDES ${stb_SOURCE_DIR})
 
 # OpenMP library 
 find_package(OpenMP REQUIRED)
@@ -59,7 +64,7 @@ file(GLOB_RECURSE SOURCES_CORE "${CMAKE_SOURCE_DIR}/core/*.cpp")
 set(SOURCE_MAIN_CLI "${CMAKE_SOURCE_DIR}/main_cli.cpp")
 
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES_CORE} ${SOURCE_MAIN_CLI})
-target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/core)
+target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/core ${INCLUDES})
 target_link_libraries(${CMAKE_PROJECT_NAME} ${LIBRARIES})
 
 if (BUILD_APP)

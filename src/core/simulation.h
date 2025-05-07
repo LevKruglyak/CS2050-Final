@@ -95,7 +95,6 @@ class Simulation {
 
     MPI_Comm_split(MPI_COMM_WORLD, wrank != 0, wrank, &comm);
     if (wrank != 0) {
-
       MPI_Comm_rank(comm, &rank);
       MPI_Comm_size(comm, &size);
 
@@ -104,9 +103,11 @@ class Simulation {
       xgrad = fftw_alloc_complex(lalloc);
       ygrad = fftw_alloc_complex(lalloc);
 
-      fftw_plan_with_nthreads(omp_get_num_threads());
+      fftw_plan_with_nthreads(omp_get_max_threads());
       fplan = fftw_mpi_plan_dft_2d(Nx, Ny, scratch_k, scratch_k, comm, FFTW_FORWARD, FFTW_MEASURE);
+      fftw_plan_with_nthreads(omp_get_max_threads());
       bxplan = fftw_mpi_plan_dft_2d(Nx, Ny, xgrad, xgrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
+      fftw_plan_with_nthreads(omp_get_max_threads());
       byplan = fftw_mpi_plan_dft_2d(Nx, Ny, ygrad, ygrad, comm, FFTW_BACKWARD, FFTW_MEASURE);
 
       rho = std::vector<double>(lNx * Ny, 0.0);

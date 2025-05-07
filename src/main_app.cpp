@@ -110,18 +110,17 @@ class App {
     if (ImPlot::BeginPlot("Viewport", ImVec2(-1.0, -1.0),
                           ImPlotFlags_Equal | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
       ImPlot::SetupAxes("", "");
-      float hr = params.RADIUS / 2.0;
-
+      float r = params.RADIUS;
       if (simulation != nullptr) {
         ImPlot::PlotImage("density", simulation->densityTexture, ImPlotPoint(0, 0),
-                          ImPlotPoint(hr, hr));
+                          ImPlotPoint(r, r));
       }
 
       ImPlot::PushPlotClipRect();
       // Draw the bounds
       ImDrawList* draw_list = ImPlot::GetPlotDrawList();
       ImVec2 p_min = ImPlot::PlotToPixels(ImPlotPoint(0, 0));
-      ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(hr, hr));
+      ImVec2 p_max = ImPlot::PlotToPixels(ImPlotPoint(r, r));
       ImU32 col = ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
 
       draw_list->AddRect(p_min, p_max, col, 0.0f, 0, 2.0f);
@@ -185,9 +184,6 @@ class App {
     ImGui::BeginDisabled(busy);
     if (ImGui::Button("Advance")) {
       broadcast_command(Command::Step);
-      for (int i = 0; i < num_iterations; ++i) {
-        simulation->timestep();
-      }
       MPI_Bcast(&num_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
       busy = true;
     }
@@ -205,6 +201,9 @@ class App {
       MPI_Recv(&dummy, 1, MPI_BYTE, st.MPI_SOURCE, TAG_DONE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       busy = false;
       progress = 0.0;
+      for (int i = 0; i < num_iterations; ++i) {
+        simulation->timestep();
+      }
 
       simulation->sync();
     }
@@ -224,8 +223,8 @@ class App {
     ImGui::LabelText("Number of Worker Nodes", "%d", wsize - 1);
     if (simulation) {
       ImGui::LabelText("Number of Particles", "%.2e", (double)simulation->N);
+      ImGui::LabelText("Elapsed Time", "%e", simulation->t);
       if (params.USE_SCALE_FACTOR) {
-        ImGui::LabelText("Elapsed Time", "%e", simulation->t);
         ImGui::LabelText("Scale Factor", "%e", simulation->a + simulation->t * simulation->adot);
         ImGui::LabelText("Hubble Factor", "%e",
                          simulation->adot / (simulation->a + simulation->t * simulation->adot));
@@ -300,8 +299,8 @@ void worker_loop() {
 int main(int argc, char** argv) {
   int provided;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
-  fftw_mpi_init();
   fftw_init_threads();
+  fftw_mpi_init();
 
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
