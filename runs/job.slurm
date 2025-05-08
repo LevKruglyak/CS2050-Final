@@ -32,6 +32,7 @@ echo "RUN res2048-$i"
 srun -N $((i+1)) build/lkxpm --config runs/res2048-ppp50.json --iterations $ITERATIONS --save-freq $SAVE_FREQ 
 echo "RUN res4096-$i"
 srun -N $((i+1)) build/lkxpm --config runs/res4096-ppp50.json --iterations $ITERATIONS --save-freq $SAVE_FREQ 
+done
 
 echo "Simulations finished."
 date
