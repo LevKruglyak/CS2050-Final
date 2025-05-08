@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
             opts.iterations;
       }
 
-      if (step % opts.save_frequency == 0) {
+      if (opts.save_frequency != 0 && step % opts.save_frequency == 0) {
         // gather the global density on rank 0
         auto global_rho = sim.gather_rho();
         if (rank == 0) {
