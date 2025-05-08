@@ -527,13 +527,14 @@ std::vector<vec2> Simulation::gather_ff() const {
 }
 
 Simulation::SimulationFrameProfile Simulation::gather_profile() {
-  constexpr int NUM_REGIONS = 8;
+  constexpr int NUM_REGIONS = 9;
 
   double sendbuf[NUM_REGIONS] = {
       rank_profile.mass_local_accum, rank_profile.mass_halo_exchange,
       rank_profile.fft_forward,      rank_profile.spectral_solve,
       rank_profile.fft_backward,     rank_profile.force_halo_exchange,
       rank_profile.update_positions, rank_profile.reassign_particles,
+      rank_profile.total_time,
   };
   double recvbuf[NUM_REGIONS] = {0};
   MPI_Reduce(sendbuf, recvbuf, NUM_REGIONS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -549,6 +550,7 @@ Simulation::SimulationFrameProfile Simulation::gather_profile() {
     avg.force_halo_exchange = recvbuf[5] / workers;
     avg.update_positions = recvbuf[6] / workers;
     avg.reassign_particles = recvbuf[7] / workers;
+    avg.total_time = recvbuf[8] / workers;
 
     return avg;
   }

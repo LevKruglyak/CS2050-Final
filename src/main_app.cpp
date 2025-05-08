@@ -29,9 +29,10 @@ class LkxProfiler {
 
   explicit LkxProfiler(size_t framesCount = 300) : _frames(framesCount), _head(0) {}
 
-  void LoadFrameData(const LkxProfilerTask* tasks, size_t count) {
+  void LoadFrameData(const LkxProfilerTask* tasks, size_t count, double total) {
     Frame& dst = _frames[_head];
     dst.tasks.assign(tasks, tasks + count);
+    dst.total = total;
     _head = (_head + 1) % _frames.size();
   }
 
@@ -82,6 +83,17 @@ class LkxProfiler {
     float yBaseL = legendBR.y;
     float yBase = legendBR.y;
     const float textH = ImGui::GetTextLineHeight() + 2.f;
+
+    if (latest.tasks.size()) {
+      ImVec2 R0(legendTL.x + 3.f + 5.f + 30.f, yBase - 3.f);
+      ImVec2 R1(R0.x + 10.f, R0.y - 10.f);
+      char buf[64];
+      float ms = float(latest.total) * 1000.f;
+      snprintf(buf, 64, "[%.2fms] Total", ms);
+      dl->AddText(ImVec2(R1.x + 5.f, R1.y - 3.f), ImGui::GetColorU32(ImGuiCol_Text), buf);
+      yBase -= (textH);
+    }
+
     for (size_t i = 0; i < latest.tasks.size(); ++i) {
       const auto& t = latest.tasks[i];
       if (yBase - textH < legendTL.y)
@@ -115,6 +127,7 @@ class LkxProfiler {
  private:
   struct Frame {
     std::vector<LkxProfilerTask> tasks;
+    double total;
   };
   std::vector<Frame> _frames;
   size_t _head = 0;
@@ -393,7 +406,7 @@ class App {
         tasks.emplace_back(profile.force_halo_exchange, "Exchange Force Halos", color1);
         tasks.emplace_back(profile.reassign_particles, "Reassign Particles", color2);
 
-        simulation->profiler.LoadFrameData(tasks.data(), tasks.size());
+        simulation->profiler.LoadFrameData(tasks.data(), tasks.size(), profile.total_time);
       }
     } else if (st.MPI_TAG == TAG_DONE) {
       char dummy;

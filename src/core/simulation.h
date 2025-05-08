@@ -25,16 +25,16 @@ class Simulation {
   };
 
   struct Params {
-    float GRAVITY = 1.0;                    // Gravitational constant
-    float SOFTENING = 0.01;                 // Softening length
-    float TIMESTEP = 0.001;                 // Integration timestep
-    float RADIUS = 1.0;                     // Periodic boundary condition radius
-    float MASS = 1.0;                       // Total mass of the universe
-    float PERLIN_NOISE_SCALE = 1.0;         // Initial Perlin noise scale
-    float PERLIN_NOISE_PERTURBATION = 1.0;  // Initial Perlin noise perturbation factor
-    int PERLIN_NOISE_OCTAVES = 4;           // Initial Perlin noise octaves
-    float PARTICLES_PER_CELL = 8;           // Total number of particles
-    bool USE_SCALE_FACTOR = false;
+    float GRAVITY = 1.0;                     // Gravitational constant
+    float SOFTENING = 0.01;                  // Softening length
+    float TIMESTEP = 0.005;                  // Integration timestep
+    float RADIUS = 1.0;                      // Periodic boundary condition radius
+    float MASS = 1.0;                        // Total mass of the universe
+    float PERLIN_NOISE_SCALE = 1.0;          // Initial Perlin noise scale
+    float PERLIN_NOISE_PERTURBATION = 0.25;  // Initial Perlin noise perturbation factor
+    int PERLIN_NOISE_OCTAVES = 4;            // Initial Perlin noise octaves
+    float PARTICLES_PER_CELL = 20;           // Total number of particles
+    bool USE_SCALE_FACTOR = true;
     ptrdiff_t RESOLUTION = 1024;  // Resolution for density texture
   };
 
@@ -85,6 +85,7 @@ class Simulation {
     double force_halo_exchange = 0.0;
     double update_positions = 0.0;
     double reassign_particles = 0.0;
+    double total_time = 0.0;
   };
 
   SimulationFrameProfile rank_profile = {};
@@ -152,10 +153,13 @@ class Simulation {
 
   SimulationFrameProfile timestep() {
     if (wrank != 0) {
+      double start = MPI_Wtime();
       update_positions();
       reassign_particles();
       assign_masses();
       compute_forces();
+      double end = MPI_Wtime();
+      rank_profile.total_time = end - start;
     }
 
     t += dt;
