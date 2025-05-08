@@ -19,11 +19,4 @@ mpirun -n $((i+1)) build/team_10_2025           \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/res2048-ppp50-$i
-
-echo "RUN res4096-ppp50-$i"
-mpirun -n $((i+1)) build/team_10_2025           \
-    --config     runs/res4096-ppp50.json      \
-    --iterations $ITERATIONS                  \
-    --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/4096-ppp50-$i
 done
