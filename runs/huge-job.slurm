@@ -8,7 +8,7 @@
 #SBATCH --error=huge-job.err
 
 ITERATIONS=500
-SAVE_FREQ=10
+SAVE_FREQ=50
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 mkdir -p runs-output
