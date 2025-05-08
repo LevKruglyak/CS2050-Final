@@ -39,7 +39,6 @@ srun -N $((i+1)) build/lkxpm   \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/res2048-ppp50-$i
-done
 
 echo "RUN res4096-ppp50-$i"
 srun -N $((i+1)) build/lkxpm   \
@@ -47,6 +46,7 @@ srun -N $((i+1)) build/lkxpm   \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/4096-ppp50-$i
+done
 
 echo "Simulations finished."
 date
