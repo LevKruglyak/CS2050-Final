@@ -2,10 +2,12 @@
 
 Large-scale cosmological simulations are an indispensable tool for cosmologists testing theories of structure formation. In the current standard model of cosmology, the universe begins almost perfectly uniformly, with tiny density perturbations seeded by inflationary expansion. In an expanding universe and under the influence of gravity, these small initial inhomogeneities are magnified into a large-scale web of galaxy clusters and voids. Such simulations are typically very computationally expensive, both from a compute and memory perspective, and so is an excellent candidate for massive parallelization.
 
-![app-screenshot](app-screenshot.png)
+![evolution](images/evolution.png)
 
 In this project, I implement a two-dimensional particle-mesh (PM) solver that follows only the collision-less dark-matter component in a flat expanding universe with periodic boundary conditions. Tracer particles sample the fluid; their masses are deposited on a uniform square grid with cloud-in-cell assignment. Poisson’s equation for the gravitational potential is solved spectrally, and the resulting forces drive a leap-frog update of particle positions and velocities. The code uses a hybrid MPI + OpenMP design, allowing the same executable to run efficiently on a laptop or scale to hundreds of CPU cores.  
 The repository exposes two front-ends to the same computational core. The CLI is always built and is intended for scripted or batch runs on HPC systems. The optional GUI application embeds the core library in an ImGui wrapper that allows for tweaking simulation parameters to see updates in real time. Both executables link against the exact same simulation engine, guaranteeing identical numerical results.
+
+![app-screenshot](images/app-screenshot.png)
 
 ## Parameters
 

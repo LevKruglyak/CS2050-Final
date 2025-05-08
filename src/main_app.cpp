@@ -349,6 +349,23 @@ class App {
     params.PERLIN_NOISE_OCTAVES = std::clamp(params.PERLIN_NOISE_OCTAVES, 1, 20);
     ImGui::EndDisabled();
 
+    ImGui::SeparatorText("Shortcuts");
+    ImGui::BeginHorizontal("param-actions");
+    ImGui::BeginDisabled(simulation != nullptr);
+    if (ImGui::Button("Zoom x2")) {
+      params.RADIUS *= 0.5;
+      params.MASS *= 0.25;
+    }
+    if (ImGui::Button("Zoom x0.5")) {
+      params.RADIUS *= 2.0;
+      params.MASS *= 4.0;
+    }
+    if (ImGui::Button("Reset")) {
+      params = Simulation::Params();
+    }
+    ImGui::EndDisabled();
+    ImGui::EndHorizontal();
+
     ImGui::SeparatorText("Actions");
 
     ImGui::BeginHorizontal("actions");
