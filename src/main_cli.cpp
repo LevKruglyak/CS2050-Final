@@ -107,10 +107,24 @@ int main(int argc, char** argv) {
     return 1.0 - exp(-input * 3.0);
   };
 
+  double average_total = 0;
+  double average_mass = 0;
+  double average_solve = 0;
+  double average_update = 0;
   {
     Simulation sim(params);
     for (int step = 0; step < opts.iterations; ++step) {
-      sim.timestep();
+      auto profile = sim.timestep();
+
+      if (rank == 0) {
+        average_total += profile.total_time / opts.iterations;
+        average_mass += (profile.mass_local_accum + profile.mass_halo_exchange) / opts.iterations;
+        average_solve +=
+            (profile.fft_forward + profile.fft_backward + profile.spectral_solve) / opts.iterations;
+        average_update +=
+            (profile.update_positions + profile.reassign_particles + profile.force_halo_exchange) /
+            opts.iterations;
+      }
 
       if (step % opts.save_frequency == 0) {
         // gather the global density on rank 0
@@ -125,10 +139,19 @@ int main(int argc, char** argv) {
           std::ostringstream filename;
           filename << opts.out_pref << "_" << step / opts.save_frequency << ".png";
           write_png(filename.str(), img, W, H);
-          std::cout << "Wrote " << filename.str() << "\n";
+          // std::cout << "Wrote " << filename.str() << "\n";
         }
       }
     }
+  }
+
+  if (rank == 0) {
+    std::cout                     //
+        << average_total << " "   //
+        << average_mass << " "    //
+        << average_solve << " "   //
+        << average_update << " "  //
+        << std::endl;             //
   }
 
   fftw_cleanup_threads();
