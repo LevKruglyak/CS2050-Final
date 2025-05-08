@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=team-10-2025
-#SBATCH --nodes=8
-#SBATCH --ntasks-per-node=1
+#SBATCH --nodes=16
+#SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
-#SBATCH --time=02:00:00
-#SBATCH --output=job_%j.out
-#SBATCH --error=job_%j.err
+#SBATCH --time=04:00:00
+#SBATCH --output=job.out
+#SBATCH --error=job.err
 
 ITERATIONS=50
 SAVE_FREQ=10
@@ -23,30 +23,27 @@ echo "------------------------------"
 date
 echo "Starting simulations..."
 
-for i in 1 4 8; do
+for i in 4 8 16; do
+echo "RUN res4096-ppp50-$i"
+srun -N $((i+1)) build/team_10_2025   \
+    --config     runs/res4096-ppp50.json      \
+    --iterations $ITERATIONS                  \
+    --save-freq  $SAVE_FREQ                   \
+    --out-prefix runs-output/4096-ppp50-$i
+
 echo "RUN res1024-ppp50-$i"
-srun -n $((i+1)) build/team_10_2025   \
+srun -N $((i+1)) build/team_10_2025   \
     --config     runs/res1024-ppp50.json      \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/res1024-ppp50-$i
 
 echo "RUN res2048-ppp50-$i"
-srun -n $((i+1)) build/team_10_2025   \
+srun -N $((i+1)) build/team_10_2025   \
     --config     runs/res2048-ppp50.json      \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/res2048-ppp50-$i
-done
-
-# Too big for ram
-for i in 4 8; do
-echo "RUN res4096-ppp50-$i"
-srun -n $((i+1)) build/team_10_2025   \
-    --config     runs/res4096-ppp50.json      \
-    --iterations $ITERATIONS                  \
-    --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/4096-ppp50-$i
 done
 
 echo "Simulations finished."
