@@ -30,12 +30,12 @@ The solver is split between **MPI** for inter-rank work and **OpenMP** for intra
 * **Timestep pipeline** – Every step executes four kernels, each threaded with OpenMP:  
   1. **Mass assignment**: cloud-in-cell (CIC) deposition of particle mass onto the local slab plus one-cell halo planes.
   2. **Mass halo exchange**: the first and last mesh columns are exchanged with neighbour ranks for accurate CIC mass assignment.
-  3. **Spectral Poisson solve**: forward FFT (FFTW-MPI), mode-by-mode division by \(4\pi G/|k|^2\), multiplications by \(-i k_x\) and \(-i k_y) with two backward transforms to obtain the force components.  
+  3. **Spectral Poisson solve**: forward FFT (FFTW-MPI), mode-by-mode division by $4\pi G/|k|^2$, multiplications by $-i k_x$ and $-i k_y$ with two backward transforms to obtain the force components.  
   4. **Force halo exchange**: the first and last force columns are exchanged with neighbour ranks for accurate CIC force interpolation.
   5. **Leap-frog update**: velocities and positions are updated; outbound particles are tagged for the next migration step.
   6. **Particle reassignment**: exchange outbound processes with neighboring ranks.
 
-* **Threading model** – Each heavy double loop (`i × j`) is wrapped in `#pragma omp parallel for collapse(2)`. FFTW plans are created once with the same thread count (`OMP_NUM_THREADS`) and reused. No per-step allocations occur.
+* **Threading model** – Each heavy double loop is wrapped in `#pragma omp parallel for collapse(2)`. FFTW plans are created once with the same thread count (`OMP_NUM_THREADS`) and reused. No per-step allocations occur.
 
 * **Profiling** – Every rank measures the wall-clock time of the kernels above; a single `MPI_Reduce` returns per-region averages to rank 0 for the final timing line.
 
@@ -48,9 +48,9 @@ The solver is split between **MPI** for inter-rank work and **OpenMP** for intra
 | [Git](https://git-scm.com) | 2.40+ | source checkout |
 | [CMake](https://cmake.org) | ≥ 3.21 | configure & build system |
 | C++20 compiler | GCC 11 / Clang 14 / MSVC 19.3 | must support OpenMP |
-| MPI library ([Open MPI](https://www.open-mpi.org)) | 4.x | provides `mpicc`, `mpic++`, `mpirun` |
-| [FFTW](http://www.fftw.org) | 3.3.x compiled **with** `--enable-mpi` **and** `--enable-openmp` | double-precision build |
+| [Open MPI](https://www.open-mpi.org) | 4.x | mpirun` |
 | OpenMP | bundled with compiler | runtime threading |
+| [FFTW](http://www.fftw.org) | 3.3.x compiled **with** `--enable-mpi` **and** `--enable-openmp` | double-precision build |
 
 ### Quick build
 
@@ -70,13 +70,12 @@ After building, the command-line executable lives at `build/lkxpm`. Note that th
 | `--config`      | `<file>`  | *none*  | JSON parameter file. Compiled-in defaults if absent |
 | `--iterations`  | `<int>`   | `1000`  | Number of leap-frog time-steps                                               |
 | `--save-freq`   | `<int>`   | `100`   | Write a PNG snapshot every *N* steps                                         |
-| `--out-prefix`  | `<string>`| `density`| Base name for output images (`<prefix>_0.png`, `<prefix>_1.png`, …)          |
+| `--out-prefix`  | `<string>`| `density`| Base name for output images          |
 
 
 #### Example
 
 ```json
-// example.json
 {
   "GRAVITY": 1.0,
   "SOFTENING": 0.01,
