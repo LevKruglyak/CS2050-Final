@@ -37,7 +37,10 @@ srun -n $((i+1)) build/team_10_2025   \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
     --out-prefix runs-output/res2048-ppp50-$i
+done
 
+# Too big for ram
+for i in 4 8; do
 echo "RUN res4096-ppp50-$i"
 srun -n $((i+1)) build/team_10_2025   \
     --config     runs/res4096-ppp50.json      \
