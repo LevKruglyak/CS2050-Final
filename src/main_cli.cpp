@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
             img[i] = density_hdr(global_rho[i]);
 
           std::ostringstream filename;
-          filename << opts.out_pref << "_" << step << ".png";
+          filename << opts.out_pref << "_" << step / opts.save_frequency << ".png";
           write_png(filename.str(), img, W, H);
           std::cout << "Wrote " << filename.str() << "\n";
         }

@@ -11,6 +11,103 @@
 #include <memory>
 #include "immapp/runner.h"
 
+namespace ImGui {
+struct LkxProfilerTask {
+  double duration;
+  const char* name;
+  uint32_t color;
+
+  LkxProfilerTask(double d, const char* n, uint32_t c) : duration(d), name(n), color(c) {}
+};
+
+class LkxProfiler {
+ public:
+  int frameWidth = 3;
+  int frameSpacing = 1;
+  bool useColoredLegendText = false;
+  float maxFrameTime = 1.f / 30.f;
+
+  explicit LkxProfiler(size_t framesCount = 300) : _frames(framesCount), _head(0) {}
+
+  void LoadFrameData(const LkxProfilerTask* tasks, size_t count) {
+    Frame& dst = _frames[_head];
+    dst.tasks.assign(tasks, tasks + count);
+    _head = (_head + 1) % _frames.size();
+  }
+
+  void Draw(int legendWidth, int height, int frameIndexOffset = 0) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 org = ImGui::GetCursorScreenPos();
+    const float fullW = ImGui::CalcItemWidth();
+    const float graphW = fullW - legendWidth;
+    const ImVec2 graphTL(org.x, org.y);
+    const ImVec2 graphBR(org.x + graphW, org.y + height);
+    const ImVec2 legendTL(org.x + graphW, org.y);
+    const ImVec2 legendBR(org.x + fullW, org.y + height);
+
+    dl->AddRectFilled(graphTL, graphBR, IM_COL32(40, 40, 40, 255));
+    dl->AddRect(graphTL, graphBR, IM_COL32(180, 180, 180, 160));
+
+    ImGui::PushClipRect(graphTL, graphBR, true);
+    for (size_t f = 0; f < _frames.size(); ++f) {
+      size_t idx = (_head + _frames.size() - 1 - frameIndexOffset - f) % _frames.size();
+      float x1 = graphBR.x - (f + 1) * (frameWidth + frameSpacing);
+      float x0 = x1 - frameWidth;
+      if (x1 < graphTL.x)
+        break;
+
+      float yCurr = graphBR.y;
+      for (auto& t : _frames[idx].tasks) {
+        float h = (float(t.duration) / maxFrameTime) * height;
+        float y0 = yCurr;
+        float y1 = yCurr - h;
+        dl->AddRectFilled(ImVec2(x0, y1), ImVec2(x1, y0), t.color);
+        yCurr = y1 - 2;
+      }
+    }
+    ImGui::PopClipRect();
+
+    const auto& latest = _frames[(_head + _frames.size() - 1) % _frames.size()];
+    float yBaseL = legendBR.y;
+    float yBase = legendBR.y;
+    const float textH = ImGui::GetTextLineHeight() + 2.f;
+    for (size_t i = 0; i < latest.tasks.size(); ++i) {
+      const auto& t = latest.tasks[i];
+      if (yBase - textH < legendTL.y)
+        break;
+
+      float endH = (float(t.duration) / maxFrameTime) * height;
+      ImVec2 L0(legendTL.x + 3.f, yBaseL);
+      ImVec2 L1(L0.x + 5.f, yBaseL - endH);
+      dl->AddRectFilled(L0, L1, t.color);
+      yBaseL -= endH + 2;
+
+      ImVec2 R0(legendTL.x + 3.f + 5.f + 30.f, yBase - 3.f);
+      ImVec2 R1(R0.x + 10.f, R0.y - 10.f);
+      dl->AddRectFilled(R0, R1, t.color);
+      yBase -= (textH);
+
+      ImVec2 pts[4] = {{L1.x, L0.y}, {L1.x, L1.y}, {R0.x, R1.y}, {R0.x, R0.y}};
+      dl->AddConvexPolyFilled(pts, 4, t.color);
+
+      char buf[64];
+      float ms = float(t.duration) * 1000.f;
+      snprintf(buf, 64, "[%.2fms] %s", ms, t.name);
+      dl->AddText(ImVec2(R1.x + 5.f, R1.y - 3.f), t.color, buf);
+    }
+
+    ImGui::Dummy(ImVec2(fullW, height));
+  }
+
+ private:
+  struct Frame {
+    std::vector<LkxProfilerTask> tasks;
+  };
+  std::vector<Frame> _frames;
+  size_t _head = 0;
+};
+}  // namespace ImGui
+
 const int TAG_PROGRESS = 3;
 const int TAG_DONE = 2;
 
@@ -95,6 +192,8 @@ class SimulationCached : public Simulation {
  public:
   GLuint densityTexture;
   std::vector<float> densityTextureData;
+
+  ImGui::LkxProfiler profiler{300};
 
   SimulationCached(Params params) : Simulation(params) { init_textures(); }
   void sync() { sync_textures(); }
@@ -215,6 +314,9 @@ class App {
     ImGui::EndHorizontal();
     ImGui::EndDisabled();
 
+    if (simulation) {
+      simulation->profiler.Draw(100, 200);
+    }
     if (busy) {
       ImGui::ProgressBar(progress, ImVec2(385, 0));
     }
@@ -302,8 +404,14 @@ int main(int argc, char** argv) {
   fftw_init_threads();
   fftw_mpi_init();
 
-  int rank;
+  int rank, size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  if (size < 2) {
+    printf("Needs at least two MPI processes to run!");
+    exit(-1);
+  }
 
   if (rank == 0) {
     std::unique_ptr<App> app = std::make_unique<App>();

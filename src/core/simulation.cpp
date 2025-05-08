@@ -1,4 +1,5 @@
 #include "simulation.h"
+#include <mpi.h>
 
 #include <cmath>
 #include <cstddef>
@@ -245,6 +246,8 @@ void Simulation::compute_forces() {
 }
 
 void Simulation::update_positions() {
+  auto start = MPI_Wtime();
+
   const double Lx = Nx * dx;
   const double Ly = Ny * dy;
 
@@ -310,6 +313,9 @@ void Simulation::update_positions() {
       p.a = na;
     }
   }
+
+  auto end = MPI_Wtime();
+  get_current_profile().update_positions = end - start;
 }
 
 vec2 Simulation::cic_force(vec2 p) {
