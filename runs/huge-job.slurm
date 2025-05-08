@@ -3,11 +3,11 @@
 #SBATCH --nodes=12
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=huge-job.out
 #SBATCH --error=huge-job.err
 
-ITERATIONS=50
+ITERATIONS=500
 SAVE_FREQ=10
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
