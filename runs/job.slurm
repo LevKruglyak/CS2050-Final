@@ -8,7 +8,7 @@
 #SBATCH --error=job.err
 
 ITERATIONS=25
-SAVE_FREQ=0
+SAVE_FREQ=0 # Don't output anything
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 mkdir -p runs-output
@@ -26,27 +26,12 @@ cmake --build build
 echo "Starting simulations..."
 
 for i in 4 6 8 10 12; do
-echo "RUN res1024-ppp50-$i"
-srun -N $((i+1)) build/lkxpm   \
-    --config     runs/res1024-ppp50.json      \
-    --iterations $ITERATIONS                  \
-    --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/res1024-ppp50-$i
-
-echo "RUN res2048-ppp50-$i"
-srun -N $((i+1)) build/lkxpm   \
-    --config     runs/res2048-ppp50.json      \
-    --iterations $ITERATIONS                  \
-    --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/res2048-ppp50-$i
-
-echo "RUN res4096-ppp50-$i"
-srun -N $((i+1)) build/lkxpm   \
-    --config     runs/res4096-ppp50.json      \
-    --iterations $ITERATIONS                  \
-    --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/4096-ppp50-$i
-done
+echo "RUN res1024-$i"
+srun -N $((i+1)) build/lkxpm --config runs/res1024-ppp50.json --iterations $ITERATIONS --save-freq $SAVE_FREQ 
+echo "RUN res2048-$i"
+srun -N $((i+1)) build/lkxpm --config runs/res2048-ppp50.json --iterations $ITERATIONS --save-freq $SAVE_FREQ 
+echo "RUN res4096-$i"
+srun -N $((i+1)) build/lkxpm --config runs/res4096-ppp50.json --iterations $ITERATIONS --save-freq $SAVE_FREQ 
 
 echo "Simulations finished."
 date
