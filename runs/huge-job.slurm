@@ -24,10 +24,10 @@ date
 echo "Starting simulation..."
 
 srun -N $SLURM_JOB_NUM_NODES build/team_10_2025   \
-    --config     runs/res8192-ppp50.json      \
+    --config     runs/res10000-ppp100.json      \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/res8192-ppp50
+    --out-prefix runs-output/res10000-ppp100
 
 echo "Simulation finished."
 date
