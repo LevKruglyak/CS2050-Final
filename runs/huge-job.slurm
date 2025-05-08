@@ -4,8 +4,8 @@
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
 #SBATCH --time=02:00:00
-#SBATCH --output=huge-job_%j.out
-#SBATCH --error=huge-job_%j.err
+#SBATCH --output=huge-job.out
+#SBATCH --error=huge-job.err
 
 ITERATIONS=50
 SAVE_FREQ=10
@@ -24,10 +24,10 @@ date
 echo "Starting simulation..."
 
 srun -N $SLURM_JOB_NUM_NODES build/team_10_2025   \
-    --config     runs/res10000-ppp100.json      \
+    --config     runs/res8192-ppp50.json      \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \
-    --out-prefix runs-output/res10000-ppp100
+    --out-prefix runs-output/res8192-ppp50
 
 echo "Simulation finished."
 date
