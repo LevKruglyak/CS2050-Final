@@ -45,8 +45,18 @@ class LkxProfiler {
     const ImVec2 legendTL(org.x + graphW, org.y);
     const ImVec2 legendBR(org.x + fullW, org.y + height);
 
+    float maxTotal = 0.0f;
+    for (auto& frame : _frames) {
+      float sum = 0.0f;
+      for (auto& t : frame.tasks)
+        sum += float(t.duration);
+      maxTotal = std::max(maxTotal, sum);
+    }
+    if (maxTotal <= 0.0f)
+      maxTotal = maxFrameTime;
+    maxTotal *= 1.2;
+
     dl->AddRectFilled(graphTL, graphBR, IM_COL32(40, 40, 40, 255));
-    dl->AddRect(graphTL, graphBR, IM_COL32(180, 180, 180, 160));
 
     ImGui::PushClipRect(graphTL, graphBR, true);
     for (size_t f = 0; f < _frames.size(); ++f) {
@@ -58,14 +68,15 @@ class LkxProfiler {
 
       float yCurr = graphBR.y;
       for (auto& t : _frames[idx].tasks) {
-        float h = (float(t.duration) / maxFrameTime) * height;
+        float h = std::max((float(t.duration) / maxTotal) * height, 1.0f);
         float y0 = yCurr;
         float y1 = yCurr - h;
         dl->AddRectFilled(ImVec2(x0, y1), ImVec2(x1, y0), t.color);
-        yCurr = y1 - 2;
+        yCurr = y1 - frameSpacing;
       }
     }
     ImGui::PopClipRect();
+    dl->AddRect(graphTL, graphBR, IM_COL32(180, 180, 180, 160));
 
     const auto& latest = _frames[(_head + _frames.size() - 1) % _frames.size()];
     float yBaseL = legendBR.y;
@@ -76,11 +87,11 @@ class LkxProfiler {
       if (yBase - textH < legendTL.y)
         break;
 
-      float endH = (float(t.duration) / maxFrameTime) * height;
+      float endH = std::max((float(t.duration) / maxTotal) * height, 1.0f);
       ImVec2 L0(legendTL.x + 3.f, yBaseL);
       ImVec2 L1(L0.x + 5.f, yBaseL - endH);
       dl->AddRectFilled(L0, L1, t.color);
-      yBaseL -= endH + 2;
+      yBaseL -= endH + frameSpacing;
 
       ImVec2 R0(legendTL.x + 3.f + 5.f + 30.f, yBase - 3.f);
       ImVec2 R1(R0.x + 10.f, R0.y - 10.f);
@@ -99,6 +110,8 @@ class LkxProfiler {
     ImGui::Dummy(ImVec2(fullW, height));
   }
 
+  bool empty() { return _frames.empty(); }
+
  private:
   struct Frame {
     std::vector<LkxProfilerTask> tasks;
@@ -107,6 +120,10 @@ class LkxProfiler {
   size_t _head = 0;
 };
 }  // namespace ImGui
+
+#define RGBA_LE(col)                                                   \
+  (((col & 0xff000000) >> (3 * 8)) + ((col & 0x00ff0000) >> (1 * 8)) + \
+   ((col & 0x0000ff00) << (1 * 8)) + ((col & 0x000000ff) << (3 * 8)))
 
 const int TAG_PROGRESS = 3;
 const int TAG_DONE = 2;
@@ -148,21 +165,77 @@ inline glm::vec3 complexColour(const glm::vec2& z) {
   return hsv2rgb(hsv);
 }
 
+constexpr glm::vec3 catmullRom(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
+                               const glm::vec3& p3, float t) {
+  const float t2 = t * t;
+  const float t3 = t2 * t;
+  return 0.5f * ((2.0f * p1) + (-p0 + p2) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                 (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+}
+
+inline constexpr std::array<glm::vec3, 256> makeCosmicLUT() {
+  struct Stop {
+    float pos;
+    glm::vec3 c;
+  };
+
+  constexpr Stop stops[] = {{0.00f, {0 / 255.f, 0 / 255.f, 0 / 255.f}},
+                            {0.20f, {45 / 255.f, 20 / 255.f, 71 / 255.f}},
+                            {0.40f, {92 / 255.f, 43 / 255.f, 111 / 255.f}},
+                            {0.60f, {125 / 255.f, 55 / 255.f, 116 / 255.f}},
+                            {0.8f, {245 / 255.f, 179 / 255.f, 50 / 255.f}},
+                            {0.95, {248 / 255.f, 239 / 255.f, 159 / 255.f}},
+                            {1.00f, {255 / 255.f, 255 / 255.f, 255 / 255.f}}};
+  constexpr std::size_t N = std::size(stops);
+
+  std::array<glm::vec3, 256> lut{};
+
+  for (std::size_t i = 0; i < lut.size(); ++i) {
+    const float t = static_cast<float>(i) / 255.0f;
+
+    std::size_t s = 0;
+    while (s + 1 < N && t > stops[s + 1].pos)
+      ++s;
+    const Stop& P0 = stops[(s == 0) ? s : s - 1];
+    const Stop& P1 = stops[s];
+    const Stop& P2 = stops[s + 1];
+    const Stop& P3 = stops[(s + 2 < N) ? s + 2 : s + 1];
+
+    const float segT = std::clamp((t - P1.pos) / (P2.pos - P1.pos), 0.0f, 1.0f);
+
+    lut[i] = catmullRom(P0.c, P1.c, P2.c, P3.c, segT);
+  }
+
+  return lut;
+}
+
+inline glm::vec3 mapHDRtoColor(float v, float maxV, const std::array<glm::vec3, 256>& lut) {
+  if (v <= 0.0f)
+    return lut[0];
+  float t = std::log(1.0f + v) / std::log(1.0f + maxV);
+  t = std::clamp(t, 0.0f, 1.0f);
+  int idx = int(t * 255.0f + 0.5f);
+  return lut[idx];
+}
+
 class SimulationCached : public Simulation {
-  float density_hdr(float input) {
-    input *= (0.3 * params.RADIUS * params.RADIUS / params.MASS);
-    return 1.0 - exp(-input * 3.0);
+  glm::fvec3 density_hdr(float input) {
+    input *= params.RADIUS * params.RADIUS / params.MASS;
+    static constexpr std::array<glm::vec3, 256> lut = makeCosmicLUT();
+    return mapHDRtoColor(1.0 - exp(-0.4 * input), 1.0, lut);
   }
 
   void load_textures() {
     broadcast_command(Command::GatherRho);
     auto globalDensity = gather_rho();
-    densityTextureData.reserve(params.RESOLUTION * params.RESOLUTION);
+    densityTextureData.reserve(params.RESOLUTION * params.RESOLUTION * 3);
 #pragma omp parallel for collapse(2)
     for (int i = 0; i < params.RESOLUTION; i++) {
       for (int j = 0; j < params.RESOLUTION; j++) {
-        densityTextureData[i * params.RESOLUTION + j] =
-            density_hdr(globalDensity[i * params.RESOLUTION + j]);
+        glm::fvec3 col = density_hdr(globalDensity[i * params.RESOLUTION + j]);
+        densityTextureData[(i * params.RESOLUTION + j) * 3 + 0] = col.x;
+        densityTextureData[(i * params.RESOLUTION + j) * 3 + 1] = col.y;
+        densityTextureData[(i * params.RESOLUTION + j) * 3 + 2] = col.z;
       }
     }
   }
@@ -172,21 +245,17 @@ class SimulationCached : public Simulation {
 
     glGenTextures(1, &densityTexture);
     glBindTexture(GL_TEXTURE_2D, densityTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RED,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, params.RESOLUTION, params.RESOLUTION, 0, GL_RGB,
                  GL_FLOAT, densityTextureData.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
   }
 
   void sync_textures() {
     load_textures();
 
     glBindTexture(GL_TEXTURE_2D, densityTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Nx, Ny, GL_RED, GL_FLOAT, densityTextureData.data());
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Nx, Ny, GL_RGB, GL_FLOAT, densityTextureData.data());
   }
 
  public:
@@ -295,14 +364,42 @@ class App {
     if (st.MPI_TAG == TAG_PROGRESS) {
       MPI_Recv(&progress, 1, MPI_FLOAT, st.MPI_SOURCE, TAG_PROGRESS, MPI_COMM_WORLD,
                MPI_STATUS_IGNORE);
+      {
+        auto profile = simulation->timestep();
+
+        const static uint32_t color1 = RGBA_LE(0x1abc9cffu);
+        const static uint32_t color2 = RGBA_LE(0x16a085ffu);
+        const static uint32_t color3 = RGBA_LE(0x2ecc71ffu);
+        const static uint32_t color4 = RGBA_LE(0x27ae60ffu);
+        const static uint32_t color5 = RGBA_LE(0x3498dbffu);
+        const static uint32_t color6 = RGBA_LE(0x2980b9ffu);
+        const static uint32_t color7 = RGBA_LE(0x9b59b6ffu);
+        const static uint32_t color8 = RGBA_LE(0x8e44adffu);
+        const static uint32_t color9 = RGBA_LE(0xf1c40fffu);
+        const static uint32_t color10 = RGBA_LE(0xf39c12ffu);
+        const static uint32_t color11 = RGBA_LE(0xe67e22ffu);
+        const static uint32_t color12 = RGBA_LE(0xd35400ffu);
+        const static uint32_t color13 = RGBA_LE(0xe74c3cffu);
+        const static uint32_t color14 = RGBA_LE(0xc0392bffu);
+
+        std::vector<ImGui::LkxProfilerTask> tasks;
+        // durations only:
+        tasks.emplace_back(profile.update_positions, "Update Positions", color1);
+        tasks.emplace_back(profile.mass_local_accum, "Accumulate Local Masses", color2);
+        tasks.emplace_back(profile.mass_halo_exchange, "Exchange Mass Halos", color3);
+        tasks.emplace_back(profile.fft_forward, "Forward FFT", color4);
+        tasks.emplace_back(profile.spectral_solve, "Spectral Gradient", color5);
+        tasks.emplace_back(profile.fft_backward, "Backward FFT", color6);
+        tasks.emplace_back(profile.force_halo_exchange, "Exchange Force Halos", color1);
+        tasks.emplace_back(profile.reassign_particles, "Reassign Particles", color2);
+
+        simulation->profiler.LoadFrameData(tasks.data(), tasks.size());
+      }
     } else if (st.MPI_TAG == TAG_DONE) {
       char dummy;
       MPI_Recv(&dummy, 1, MPI_BYTE, st.MPI_SOURCE, TAG_DONE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       busy = false;
       progress = 0.0;
-      for (int i = 0; i < num_iterations; ++i) {
-        simulation->timestep();
-      }
 
       simulation->sync();
     }
@@ -315,10 +412,9 @@ class App {
     ImGui::EndDisabled();
 
     if (simulation) {
-      simulation->profiler.Draw(100, 200);
-    }
-    if (busy) {
       ImGui::ProgressBar(progress, ImVec2(385, 0));
+      if (!simulation->profiler.empty())
+        simulation->profiler.Draw(100, 200);
     }
 
     ImGui::SeparatorText("Information");

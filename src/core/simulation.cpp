@@ -78,13 +78,13 @@ void Simulation::generate_particles(seed_density seed) {
 }
 
 void Simulation::assign_masses() {
+  auto start = MPI_Wtime();
   std::fill(rho_ext.begin(), rho_ext.end(), 0.0);
-
   std::vector<double> send_left(Ny, 0.0), send_right(Ny, 0.0);
-
   int left_edge = (int(lx0) - 1 + int(Nx)) % int(Nx);
   int right_edge = (int(lx0) + int(lNx)) % int(Nx);
 
+#pragma omp parallel for
   for (auto& p : particles) {
     double fx = std::fmod(p.p.x / dx, Nx);
     double fy = std::fmod(p.p.y / dy, Ny);
@@ -122,7 +122,10 @@ void Simulation::assign_masses() {
       }
     }
   }
+  auto end = MPI_Wtime();
+  rank_profile.mass_local_accum = end - start;
 
+  start = MPI_Wtime();
   if (size > 1) {
     std::vector<double> recv_left(Ny, 0.0), recv_right(Ny, 0.0);
     int left = (rank == 0 ? size - 1 : rank - 1);
@@ -143,10 +146,11 @@ void Simulation::assign_masses() {
     MPI_Sendrecv(&rho_ext[1 * Ny], Ny, MPI_DOUBLE, left, 3, &rho_ext[(lNx + 1) * Ny], Ny,
                  MPI_DOUBLE, right, 3, comm, MPI_STATUS_IGNORE);
   }
-
   for (int i = 0; i < lNx; ++i) {
     std::copy_n(&rho_ext[(i + 1) * Ny], Ny, &rho[i * Ny]);
   }
+  end = MPI_Wtime();
+  rank_profile.mass_halo_exchange = end - start;
 }
 
 const MPI_Datatype get_mpi_particle_type() {
@@ -171,6 +175,7 @@ const MPI_Datatype get_mpi_particle_type() {
 }
 
 void Simulation::compute_forces() {
+  auto start = MPI_Wtime();
   // Set up the conversion to Fourier space
 #pragma omp parallel for collapse(2)
   for (int i = 0; i < lNx; i++) {
@@ -182,7 +187,10 @@ void Simulation::compute_forces() {
 
   // Forward FFT
   fftw_execute(fplan);
+  auto end = MPI_Wtime();
+  rank_profile.fft_forward = end - start;
 
+  start = MPI_Wtime();
   // Invert Laplacian and compute spectral gradients
   double scale = 4 * M_PI * params.GRAVITY * (a * a);
 #pragma omp parallel for collapse(2)
@@ -207,7 +215,10 @@ void Simulation::compute_forces() {
       ygrad[idx][1] = -ky * re;
     }
   }
+  end = MPI_Wtime();
+  rank_profile.spectral_solve = end - start;
 
+  start = MPI_Wtime();
   // Inverse the Fourier transform
   fftw_execute(bxplan);
   fftw_execute(byplan);
@@ -223,7 +234,10 @@ void Simulation::compute_forces() {
       ff[idx] = vec2(-fx, -fy);
     }
   }
+  end = MPI_Wtime();
+  rank_profile.fft_backward = end - start;
 
+  start = MPI_Wtime();
   // Exchange force halos (for accurate CIC)
   if (size != 1) {
     ff_left_halo.resize(Ny);
@@ -243,6 +257,8 @@ void Simulation::compute_forces() {
     MPI_Sendrecv(send_right.data(), Ny * 2, MPI_DOUBLE, right, 1, ff_left_halo.data(), Ny * 2,
                  MPI_DOUBLE, left, 1, comm, MPI_STATUS_IGNORE);
   }
+  end = MPI_Wtime();
+  rank_profile.force_halo_exchange = end - start;
 }
 
 void Simulation::update_positions() {
@@ -315,7 +331,7 @@ void Simulation::update_positions() {
   }
 
   auto end = MPI_Wtime();
-  get_current_profile().update_positions = end - start;
+  rank_profile.update_positions = end - start;
 }
 
 vec2 Simulation::cic_force(vec2 p) {
@@ -368,6 +384,7 @@ void Simulation::reassign_particles() {
   if (size == 1)
     return;
 
+  auto start = MPI_Wtime();
   int left = (rank == 0 ? size - 1 : rank - 1);
   int right = (rank == size - 1 ? 0 : rank + 1);
   auto mpiP = get_mpi_particle_type();
@@ -405,6 +422,8 @@ void Simulation::reassign_particles() {
   particles.insert(particles.end(), recv_right.begin(), recv_right.end());
 
   move_dir.clear();
+  auto end = MPI_Wtime();
+  rank_profile.reassign_particles = end - start;
 }
 
 std::vector<Particle> Simulation::gather_particles() const {
@@ -502,6 +521,36 @@ std::vector<vec2> Simulation::gather_ff() const {
               displs.data(), MPI_DOUBLE_COMPLEX, 0, comm);
   if (rank == 0) {
     MPI_Send(ff_global.data(), ff_global.size(), MPI_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+  }
+
+  return {};
+}
+
+Simulation::SimulationFrameProfile Simulation::gather_profile() {
+  constexpr int NUM_REGIONS = 8;
+
+  double sendbuf[NUM_REGIONS] = {
+      rank_profile.mass_local_accum, rank_profile.mass_halo_exchange,
+      rank_profile.fft_forward,      rank_profile.spectral_solve,
+      rank_profile.fft_backward,     rank_profile.force_halo_exchange,
+      rank_profile.update_positions, rank_profile.reassign_particles,
+  };
+  double recvbuf[NUM_REGIONS] = {0};
+  MPI_Reduce(sendbuf, recvbuf, NUM_REGIONS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+  if (wrank == 0) {
+    int workers = wsize - 1;  // exclude rank 0 itself
+    SimulationFrameProfile avg{};
+    avg.mass_local_accum = recvbuf[0] / workers;
+    avg.mass_halo_exchange = recvbuf[1] / workers;
+    avg.fft_forward = recvbuf[2] / workers;
+    avg.spectral_solve = recvbuf[3] / workers;
+    avg.fft_backward = recvbuf[4] / workers;
+    avg.force_halo_exchange = recvbuf[5] / workers;
+    avg.update_positions = recvbuf[6] / workers;
+    avg.reassign_particles = recvbuf[7] / workers;
+
+    return avg;
   }
 
   return {};

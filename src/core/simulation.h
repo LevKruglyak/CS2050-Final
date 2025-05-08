@@ -27,7 +27,7 @@ class Simulation {
   struct Params {
     float GRAVITY = 1.0;                    // Gravitational constant
     float SOFTENING = 0.01;                 // Softening length
-    float TIMESTEP = 0.01;                  // Integration timestep
+    float TIMESTEP = 0.001;                 // Integration timestep
     float RADIUS = 1.0;                     // Periodic boundary condition radius
     float MASS = 1.0;                       // Total mass of the universe
     float PERLIN_NOISE_SCALE = 1.0;         // Initial Perlin noise scale
@@ -79,19 +79,15 @@ class Simulation {
   struct SimulationFrameProfile {
     double mass_local_accum = 0.0;
     double mass_halo_exchange = 0.0;
-    double mass_copy_to_rho = 0.0;
     double fft_forward = 0.0;
     double spectral_solve = 0.0;
-    double fft_backward_x = 0.0;
-    double fft_backward_y = 0.0;
-    double force_normalize = 0.0;
+    double fft_backward = 0.0;
     double force_halo_exchange = 0.0;
     double update_positions = 0.0;
     double reassign_particles = 0.0;
-    double allreduce_mass_sum = 0.0;
-    double allreduce_particle_count = 0.0;
   };
-  std::vector<SimulationFrameProfile> profile;
+
+  SimulationFrameProfile rank_profile = {};
 
  public:
   Simulation(Params params) : params(params) {
@@ -154,11 +150,7 @@ class Simulation {
     }
   }
 
-  SimulationFrameProfile& get_current_profile() { return profile[profile.size() - 1]; }
-
-  void timestep() {
-    profile.push_back(SimulationFrameProfile{});
-
+  SimulationFrameProfile timestep() {
     if (wrank != 0) {
       update_positions();
       reassign_particles();
@@ -167,6 +159,7 @@ class Simulation {
     }
 
     t += dt;
+    return gather_profile();
   }
 
   ~Simulation() {
@@ -191,6 +184,7 @@ class Simulation {
   void compute_forces();
   void update_positions();
   void reassign_particles();
+  SimulationFrameProfile gather_profile();
 
   vec2 cic_force(vec2 p);
 };
