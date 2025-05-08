@@ -75,7 +75,7 @@ After building, the command-line executable lives at `build/lkxpm`. Note that th
 
 #### Example
 
-```json
+```json file=example.json
 {
   "GRAVITY": 1.0,
   "SOFTENING": 0.01,
@@ -102,6 +102,7 @@ mpirun -n 4 build/lkxpm \
 ```
 
 Note that the output directory must already exist prior to running the executable.
+For some more examples, see the ```runs/``` folder.
 
 #### Output
  * PNG frames – Greyscale surface-density images written by rank 0 at the specified frequency.
