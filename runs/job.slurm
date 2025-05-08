@@ -1,15 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=team-10-res-1024
+#SBATCH --job-name=team-10-2025
 #SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=job_%j.out
 #SBATCH --error=job_%j.err
 
-ITERATIONS=5
-SAVE_FREQ=100
+ITERATIONS=50
+SAVE_FREQ=10
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 mkdir -p runs-output
