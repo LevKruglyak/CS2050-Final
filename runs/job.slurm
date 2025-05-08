@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=team-10-2025
-#SBATCH --nodes=16
+#SBATCH --nodes=13
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
 #SBATCH --time=04:00:00
