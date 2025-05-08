@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(team_10_2025 CXX)
+project(lkxpm CXX)
 
 option(BUILD_APP "Build Vulkan/ImGui executable" OFF)
 
@@ -38,6 +38,7 @@ list(APPEND LIBRARIES nlohmann_json::nlohmann_json)
 # Perlin noise library
 FetchContent_Declare(perlin GIT_REPOSITORY https://github.com/Reputeless/PerlinNoise.git GIT_TAG v3.0.0)
 FetchContent_MakeAvailable(perlin)
+list(APPEND INCLUDES ${perlin_SOURCE_DIR})
 
 # stb library
 FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git GIT_TAG master)

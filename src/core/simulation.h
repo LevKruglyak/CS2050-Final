@@ -4,10 +4,10 @@
 #include <mpi.h>
 #include <omp.h>
 
-#include <perlin.h>
 #include <cstddef>
 #include <functional>
 #include <vector>
+#include "PerlinNoise.hpp"
 #include "common.h"
 
 class Simulation {
@@ -27,7 +27,7 @@ class Simulation {
   struct Params {
     float GRAVITY = 1.0;                     // Gravitational constant
     float SOFTENING = 0.01;                  // Softening length
-    float TIMESTEP = 0.005;                  // Integration timestep
+    float TIMESTEP = 0.01;                   // Integration timestep
     float RADIUS = 1.0;                      // Periodic boundary condition radius
     float MASS = 1.0;                        // Total mass of the universe
     float PERLIN_NOISE_SCALE = 1.0;          // Initial Perlin noise scale

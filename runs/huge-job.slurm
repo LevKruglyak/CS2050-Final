@@ -23,7 +23,7 @@ echo "------------------------------"
 date
 echo "Starting simulation..."
 
-srun -N $SLURM_JOB_NUM_NODES build/team_10_2025   \
+srun -N $SLURM_JOB_NUM_NODES build/lkxpm \
     --config     runs/res8192-ppp50.json      \
     --iterations $ITERATIONS                  \
     --save-freq  $SAVE_FREQ                   \

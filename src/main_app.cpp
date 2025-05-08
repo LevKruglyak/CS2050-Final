@@ -1,3 +1,4 @@
+#include "glm/fwd.hpp"
 #include "hello_imgui/hello_imgui_include_opengl.h"
 #include "imgui.h"
 #include "imgui_stacklayout.h"
@@ -186,22 +187,27 @@ constexpr glm::vec3 catmullRom(const glm::vec3& p0, const glm::vec3& p1, const g
                  (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
 }
 
-inline constexpr std::array<glm::vec3, 256> makeCosmicLUT() {
+inline constexpr std::array<glm::fvec3, 256> makeCosmicLUT() {
   struct Stop {
     float pos;
-    glm::vec3 c;
+    glm::fvec3 c;
   };
 
-  constexpr Stop stops[] = {{0.00f, {0 / 255.f, 0 / 255.f, 0 / 255.f}},
-                            {0.20f, {45 / 255.f, 20 / 255.f, 71 / 255.f}},
-                            {0.40f, {92 / 255.f, 43 / 255.f, 111 / 255.f}},
-                            {0.60f, {125 / 255.f, 55 / 255.f, 116 / 255.f}},
-                            {0.8f, {245 / 255.f, 179 / 255.f, 50 / 255.f}},
-                            {0.95, {248 / 255.f, 239 / 255.f, 159 / 255.f}},
-                            {1.00f, {255 / 255.f, 255 / 255.f, 255 / 255.f}}};
+  constexpr ImU32 Plasma[] = {4287039501, 4288480321, 4289200234, 4288941455,
+                              4287638193, 4286072780, 4284638433, 4283139314,
+                              4281771772, 4280667900, 4280416752};
+  Stop stops[11];
+  for (int i = 0; i < 11; i++) {
+    float s = 1.0f / 255.0f;
+    auto color = glm::fvec3(((Plasma[i] >> IM_COL32_R_SHIFT) & 0xFF) * s,
+                            ((Plasma[i] >> IM_COL32_G_SHIFT) & 0xFF) * s,
+                            ((Plasma[i] >> IM_COL32_B_SHIFT) & 0xFF) * s);
+    stops[i] = {i / 10.0f, color};
+  }
+
   constexpr std::size_t N = std::size(stops);
 
-  std::array<glm::vec3, 256> lut{};
+  std::array<glm::fvec3, 256> lut{};
 
   for (std::size_t i = 0; i < lut.size(); ++i) {
     const float t = static_cast<float>(i) / 255.0f;
@@ -234,7 +240,7 @@ inline glm::vec3 mapHDRtoColor(float v, float maxV, const std::array<glm::vec3, 
 class SimulationCached : public Simulation {
   glm::fvec3 density_hdr(float input) {
     input *= params.RADIUS * params.RADIUS / params.MASS;
-    static constexpr std::array<glm::vec3, 256> lut = makeCosmicLUT();
+    static constexpr std::array<glm::fvec3, 256> lut = makeCosmicLUT();
     return mapHDRtoColor(1.0 - exp(-0.4 * input), 1.0, lut);
   }
 
