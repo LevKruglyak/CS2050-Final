@@ -1,0 +1,17 @@
+*.log
+*.aux
+*.bcf
+*.bcf*
+*.fls
+*.idx
+*.ilg
+*.ind
+*.log
+*.out
+*.xml
+*.gz
+*.toc
+*.bbl*
+*.blg
+*.synctex(busy)
+*.fdb_latexmk
