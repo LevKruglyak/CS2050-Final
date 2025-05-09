@@ -196,14 +196,15 @@ inline constexpr std::array<glm::fvec3, 256> makeCosmicLUT() {
   constexpr ImU32 Plasma[] = {4287039501, 4288480321, 4289200234, 4288941455,
                               4287638193, 4286072780, 4284638433, 4283139314,
                               4281771772, 4280667900, 4280416752};
-  Stop stops[11];
+  Stop stops[12];
   for (int i = 0; i < 11; i++) {
     float s = 1.0f / 255.0f;
     auto color = glm::fvec3(((Plasma[i] >> IM_COL32_R_SHIFT) & 0xFF) * s,
                             ((Plasma[i] >> IM_COL32_G_SHIFT) & 0xFF) * s,
                             ((Plasma[i] >> IM_COL32_B_SHIFT) & 0xFF) * s);
-    stops[i] = {i / 10.0f, color};
+    stops[i] = {i / 11.0f, color};
   }
+  stops[11] = {1.0, glm::fvec3(1.0)};
 
   constexpr std::size_t N = std::size(stops);
 

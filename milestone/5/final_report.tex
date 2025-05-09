@@ -1,10 +1,340 @@
 \documentclass{lkx_paper}
 
-\title{Large-Scale Gravity Simulation}
+\title{Accelerating Particle-Mesh Gravity\\ Simulations with OpenMP and MPI}
 \author{Lev Kruglyak}
+
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+  \usetikzlibrary{
+        pgfplots.colorbrewer,
+    }
+    \pgfplotsset{
+        cycle from colormap manual style/.style={
+            every axis plot/.style={line width=1pt, mark=*},
+            trim axis left,
+            trim axis right,
+        },
+        log x ticks with fixed point/.style={
+            xticklabel={
+              \pgfkeys{/pgf/fpu=true}
+              \pgfmathparse{exp(\tick)}%
+              \pgfmathprintnumber[fixed relative, precision=3]{\pgfmathresult}
+              \pgfkeys{/pgf/fpu=false}
+            }
+        },
+        log y ticks with fixed point/.style={
+            yticklabel={
+              \pgfkeys{/pgf/fpu=true}
+              \pgfmathparse{exp(\tick)}%
+              \pgfmathprintnumber[fixed relative, precision=3]{\pgfmathresult}
+              \pgfkeys{/pgf/fpu=false}
+            }
+        }
+    }
+\usepackage{bm}
+\usepackage{graphicx}
 
 \begin{document}
 
-\section*{Introduction}
+\section{Introduction}
+
+Large-scale gravitational simulations have become an indispensable tool of precision cosmology, connecting our understanding of the early universe with the large scale structures we see today. In the standard model of cosmology, the universe begins almost perfectly uniformly, with tiny density perturbations seeded by inflationary expansion. Under the influence of gravity and with the expansion of the universe, these initial inhomogeneities are magnified into a web of galaxy clusters and voids.
+Simulating such evolution is typically very expensive to run, both from a compute and memory perspective, and so this is an excellent candidate for massive parallelization.
+
+Two‑dimensional toy models can provide valuable insight into algorithmic behavior, scaling properties, and qualitative features of clustering with far lower computational cost and simpler implementation details. In this project we implement a highly parallel large-scale gravitational solver, using the particle-mesh (PM) algorithm to simulate the evolution of a flat, two-dimensional, expanding, dark-matter dominated universe with periodic boundary conditions.
+
+\subsection{The Particle-Mesh Algorithm}
+
+In a classical $N$-body simulation we simulate $N$ particles each with mass $m_i$ and position $\bm{x}_i$. The particles obey Newton’s law of gravitation, i.e.
+\[
+  m_i\,\frac{\partial^2\bm{x}_i}{\partial t^2}
+  =
+  -G\,m_i \sum_{j\neq i}
+  m_j\,\frac{\bm{x}_i-\bm{x}_j}{|\bm{x}_i-\bm{x}_j|^{3}},
+\]
+so the force evaluation scales as $\mathcal{O}(N^2)$.  For cosmological problems where $N$ can exceed $10^{8}$, the quadratic cost and memory traffic of computing all pairwise interactions becomes computationally unfeasible.
+
+A useful alternative is to regard the system as a collisionless fluid characterized by its mass density field $\rho(\bm{x})$. By the Poisson equations, the gravitational potential $\phi(\bm{x})$ satisfies
+\[
+  \nabla^{2}\phi(\bm{x}) 
+  = 4\pi G\rho(\bm{x}).
+\]
+and the force at each point is then $\bm{F}(\bm{x})=-\nabla\phi(\bm{x})$.
+If we work in a flat, periodic square of side length \(L\), every function can be represented by its complex Fourier transform
+\[
+  f(\bm{x}) = \int \hat{f}(\bm{k})\,e^{i\bm{k}\cdot\bm{k}}\, \mathrm{d}^2 \bm{k},
+  \qquad
+  \hat{f}(\bm{k}) = L^{-2}\int
+  f(\bm{x})\,e^{-i\bm{k}\cdot\bm{x}}\;\mathrm{d}^{2}\bm{x},
+\]
+with wave-vectors
+$\bm{k}= 2\pi L^{-1}(n_{x},n_{y})$ for $n_{x},n_{y}\in\mathbb{Z}$.
+Under this transform, the Laplacian operator $\nabla^2$ becomes multiplication by $-|\bm{k}|^2$, and so for every non-zero Fourier node we have
+\[
+  \hat{\phi}(\bm{k}) = -\frac{4\pi G}{\lvert\bm{k}\rvert^{2}}\,
+  \hat{\rho}(\bm{k}),
+  \qquad
+  \bm{k}\neq 0,
+\]
+while the \(\bm{k}=\bm{0}\) (mean-density) mode is set to zero to avoid a singularity.
+The gradient operator $\nabla$ in Fourier space becomes multiplication by $i\bm{k}$ (we get two components here). Thus, once the potential is known spectrally, its gradient can be computed in Fourier space and mapped back to ordinary space as
+\[
+  \begin{aligned}
+  \widehat{\bm{F}}(\bm{k})
+  &= \mathrm{i}\bm{k}\hat{\phi}(\bm{k})
+  =-\frac{4\pi i G\bm{k}}{\lvert\bm{k}\rvert^{2}}\,
+  \hat{\rho}(\bm{k})\\
+  \bm{F}(\bm{x}) 
+  &= 
+  \int i\bm{k}\widehat{\phi}(\bm{k})e^{i\bm{k}\cdot \bm{x}}\mathrm{d}^2\bm{k}
+  =-\int \frac{4\pi i G\bm{k}}{\lvert\bm{k}\rvert^{2}} e^{i\bm{k}\cdot \bm{x}}\,\mathrm{d}^2\bm{k}
+  .
+\end{aligned}
+\]
+In other words, both ``inverting’’ the Laplacian and computing the potential gradient boil down to simple, element-wise multiplications in Fourier space. 
+These analytic solutions to the Poisson equation can be numerically solved by adding ``tracer'' particles which sample the density field. This coupling of particle with field is known as the particle-mesh algorithm.
+
+The PM algorithm starts by populating the domain with $N$ tracer particles that sample the prescribed surface-density field. We then enter a timestep loop by which we we evolve the universe.
+During each step the particle masses are deposited onto a
+uniform mesh with a Cloud-In-Cell (CIC) kernel,
+yielding the mesh density values $\rho(\bm{x})$.
+We then Fourier-transform this 2d texture, apply the
+mode-by-mode Laplacian inversion and spectral gradient described above to obtain
+$\widehat{\bm{F}}(\bm{k})$, and inverse-transform to recover
+the force field $\bm{F}(\bm{x})$ on the mesh.
+Finally, CIC interpolation maps the mesh forces back to the individual particles.
+Particle positions and velocities are advanced with a
+second-order symplectic leapfrog in the using kick–drift–kick sequence:
+a half-step velocity kick using the old force, a full position drift,
+recomputation of forces via the mesh, and a final half-kick.
+Finally, periodic boundary conditions wrap any coordinate that exits the box \([0,L)\).
+
+\section{Implementation}
+\label{sec:implementation}
+
+The solver is written in modern \texttt{C++20} and built with \texttt{CMake}.
+It uses a hybrid \textbf{MPI\,+\,OpenMP} model:
+MPI distributes independent slabs of the mesh across
+nodes, while OpenMP exploits the many cores available
+within each node.
+The only external dependencies are
+\texttt{FFTW} (MPI and OpenMP flavours), \texttt{OpenMP},
+\texttt{MPI}, \texttt{glm} for algebra, and \texttt{nlohmann/json} for run-time
+configuration; all are fetched at configure time via
+\texttt{FetchContent}.
+The rank 0 node is reserved for I/O and visualisation, with the remaining nodes used for computation.
+
+\subsection{Domain Decomposition}
+\label{subsec:domain}
+
+A one–dimensional slab decomposition is adopted.
+For a mesh of \(N_x\times N_y\) cells every worker rank
+owns a contiguous strip of \(lN_x\) columns starting at
+global index \(l x_0\).
+This choice keeps the real-space arrays
+contiguous in the \(y\) direction and avoids the expensive
+all-to-all communication required by a full 2-D pencil
+layout.
+Two guard columns are stored on either side of each slab so that particle deposition and force interpolation never read or write remote memory.
+Only the guard columns are exchanged with the left and
+right neighbours at each time-step using \texttt{MPI\_Sendrecv}.
+
+\subsection{Particle Generation and Sampling}
+\label{subsec:particles}
+
+At initialization the code must generate \(N_{p}\times N_x \times N_y\) tracer particles
+that sample an analytically defined surface–density field
+\(\rho_{\rm init}(x,y)\), where $N_{p}$ is the number of particles per pixel.
+We tile the unit square \([0,L)\times[0,L)\) with a regular grid
+of candidate positions and then apply an acceptance–rejection
+scheme: for each grid point \((x_i,y_j)\), we draw a uniform
+random number \(u\in[0,\rho_{\max}]\) (with \(\rho_{\max}\)
+given by the known maximum of \(\rho_{\rm init}\)) and accept
+the sample if \(u<\rho_{\rm init}(x_i,y_j)\).
+Accepted points are stored in the host vector \texttt{particles}
+until the appropriate number of particles is generated.
+This approach ensures that the empirical distribution of
+particles exactly matches the target density, while avoiding
+the complexity of more advanced sampling methods.
+
+The random streams on each MPI rank are seeded from a
+deterministic combination of a global seed, the MPI rank, and the OpenMP
+thread ID. This guarantees reproducible, independent samples across
+ranks and threads.  Before entering the time-stepping loop,
+each rank contributes its local batch of particles to a global
+count via \texttt{MPI\_Allreduce}, enabling diagnostics on the
+achieved sampling accuracy and total particle number.
+
+\subsection{Mass Deposition and Halo Exchange}
+
+Particle–to–mesh (CIC) deposition is perfectly parallelizable, so
+an \texttt{omp parallel for} loop walks the local
+particle array and updates the four nearest mesh nodes with a
+thread-private accumulator.
+Within a rank all threads write directly into the shared buffer, so no threading synchronisation is needed.
+Mass that spills into a guard column is collected in
+two small send buffers, and these these are exchanged with the neighbouring ranks and added to the remote guard columns before the guard-to-core copy is performed.
+The resulting cost of halo exchange is \(O(2N_y)\) doubles per rank, completely independent of the number of particles.
+
+\subsection{Spectral Solver}
+
+The Poisson solve is performed with the \texttt{FFTW} MPI
+interface:
+\begin{enumerate}
+  \item Each rank copies its real \(\rho\) slab into a  
+        complex work array, and
+        performs an in-place \texttt{c2c} Fourier transform using \texttt{FFTW}.
+  \item A single parallel OpenMP loop multiplies every spectral node by
+        \(-4\pi G/(k_x^2+k_y^2+\epsilon^2)\),
+        computes the scaled gradients
+        \(i k_x\hat{\phi}\) and \(i k_y\hat{\phi}\), and stores them
+        in a vector field. Adding the softening term \(\epsilon^2\) prevents division
+        by~0 and damps small-scale noise.
+  \item Two inverse FFTs populate the real-space force vector field.
+\end{enumerate}
+
+Because FFTW’s MPI back-end redistributes data internally,
+no explicit \emph{transpose} is needed. The slab layout is
+preserved from input to output, and the only inter-rank
+traffic is the automatically managed all-to-all inside FFTW.
+
+\subsection{Force Interpolation and Particle Update}
+
+After the spectral solve, a second halo exchange sends one
+column of \( \mathbf{F}\) on either side so that the
+CIC interpolation routine can read four force values for
+every particle regardless of where it sits in the cell.
+OpenMP is again used to update particles:
+
+\begin{enumerate}
+\item In the kick-drift-kick stage, the two velocity kicks and the position drift are combined in one parallel OpenMP pass over the particle array. 
+\item A lightweight integer flag records whether
+      a particle crossed the left or right domain boundary.
+      The actual migration is a two-step \texttt{MPI\_Sendrecv}.
+\end{enumerate}
+
+\section{Results}
+
+To heuristically verify that our solver reproduces the expected cosmic‐web, we initialized the particle distribution using a two‐dimensional Perlin‐noise field with a prescribed spectral slope. This generates smooth, multi‐scale density fluctuations that mimic the scale‐free nature of primordial perturbations.  Figure \ref{fig:evolution} shows the time evolution of the surface density: the initially correlated noise (left panels) is gradually amplified by gravity into a network of filaments and nodes separated by underdense voids (right panels). The emergent web‐like patterns -- filament thickness, void sizes, and connectivity -- are in qualitative agreement with those seen in full $N$‑body cosmological simulations, giving confidence that our PM solver captures the essential physics of structure formation.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[scale=0.19]{evolution.png}
+  \caption{Structure formation as simulated by our solver.}\label{fig:evolution}
+\end{figure}
+
+\section{Performance and Scaling Analysis}
+All timings represent the wall–clock seconds required for one complete
+PM timestep (mass assignment, FFT–based Poisson solve, force interpolation, and leapfrog update).
+
+\begin{figure}[ht]
+  \centering
+\begin{tikzpicture}
+  \begin{axis}[
+    xmode =log, ymode =log, 
+    cycle list/RdYlBu-6,
+    cycle from colormap manual style,
+    width=6in, height=2.5in,
+    grid=both, grid style={dashed,gray!30}, 
+    xlabel={number of nodes}, ylabel={seconds per timestep},
+    xtick=data, log ticks with fixed point, 
+    tick label style={/pgf/number format/fixed},
+    legend style={at={(0.5,1.02)}, anchor=south,
+        legend columns=-1, align=center,
+        /tikz/every even column/.append style={column sep=5pt}
+      }
+    ]
+    \addplot table[col sep=space, header=true, x=n, y=1024] {strong-scaling.dat};
+    \addlegendentry{$1024\times 1024$ mesh}
+    \addplot table[col sep=space, header=true, x=n, y=2048] {strong-scaling.dat};
+    \addlegendentry{$2048\times 2048$ mesh}
+    \addplot table[col sep=space, header=true, x=n, y=4096] {strong-scaling.dat};
+    \addlegendentry{$4096\times 4096$ mesh}
+  \end{axis}
+\end{tikzpicture}
+\caption{Timestep Duration vs Number of Nodes}\label{scale1}
+\end{figure}
+
+\cref{scale1} fixes the mesh size and varies the number of compute nodes.
+For every resolution the timestep cost falls roughly as
+\(\mathrm{T}\propto N_{\text{node}}^{-1}\) until about ten nodes, after which the
+curve flattens slightly as inter-node communication begins to dominate, especially for small mesh sizes, where there is less work to be done.
+
+\begin{figure}[ht]
+\begin{tikzpicture}
+  \begin{axis}[
+    cycle list/RdYlBu-6,
+    cycle from colormap manual style,
+    xmode =log, ymode =log, log basis x={2}, width=6in, height=2.5in,
+    xlabel={mesh resolution}, ylabel={seconds per timestep},
+    grid=both, grid style={dashed,gray!30}, 
+    xtick=data, log y ticks with fixed point, 
+    legend style={at={(0.5,1.02)}, anchor=south,
+        legend columns=3, align=center,
+        /tikz/every even column/.append style={column sep=5pt}
+      }
+    ]
+    \addplot table[x=res,y=n2,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$2$ nodes}
+    \addplot table[x=res,y=n4,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$4$ nodes}
+    \addplot table[x=res,y=n6,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$6$ nodes}
+    \addplot table[x=res,y=n8,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$8$ nodes}
+    \addplot table[x=res,y=n10,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$10$ nodes}
+    \addplot table[x=res,y=n12,col sep=space,header=true] {strong-scaling-trans.dat};
+    \addlegendentry{$12$ nodes}
+  \end{axis}
+\end{tikzpicture}
+\caption{Timestep Duration vs Mesh Resolution}\label{scale2}
+\end{figure}
+
+\cref{scale2} inverts the perspective: each series holds the node count constant while increasing the mesh resolution. The plot shows a time complexity consistent with the theoretical one.
+\cref{scale3} normalises every timing series to its slowest run, highlighting the
+parallel efficiency.
+For the 4096\(^2\) mesh we obtain nearly ideal speed-up through eight nodes
+and retain consistent acceleration at twelve nodes. The smaller grids begin to saturate earlier, reflecting the growing share of
+communication versus local compute.
+
+\begin{figure}[ht]
+\begin{tikzpicture}
+  \begin{axis}[
+    cycle list/RdYlBu-6,
+    cycle from colormap manual style,
+    width=6in, height=2.5in,
+    grid=both, grid style={dashed,gray!30}, 
+    xlabel={number of nodes}, ylabel={speedup over slowest case},
+    xtick=data, 
+    tick label style={/pgf/number format/fixed},
+    legend style={at={(0.5,1.02)}, anchor=south,
+        legend columns=-1, align=center,
+        /tikz/every even column/.append style={column sep=5pt}
+      }
+    ]
+    \addplot table[col sep=space, header=true, x=n, y=1024] {speedup.dat};
+    \addlegendentry{$1024\times 1024$ mesh}
+    \addplot table[col sep=space, header=true, x=n, y=2048] {speedup.dat};
+    \addlegendentry{$2048\times 2048$ mesh}
+    \addplot table[col sep=space, header=true, x=n, y=4096] {speedup.dat};
+    \addlegendentry{$4096\times 4096$ mesh}
+  \end{axis}
+\end{tikzpicture}
+\caption{Speedup vs Number of Nodes}\label{scale3}
+\end{figure}
+
+\subsection{Simulation Details}
+
+Aside from varying the resolution of the mesh, the other simulation parameters were left constant. We use a $1.0\times 1.0$ box, with total mass $1.0$ and gravitational force $1.0$. We add 50 particles per cell. The initial conditions use 2d Perlin noise with 4 octaves and a scale of 1.0. This contributes 0.25 perturbation to an initially uniform density.
+
+\section{Resource Justification}
+\label{sec:resources}
+
+We would like to run a \(16384\times16384\) mesh with 50 tracer particles per cell. We select a production‐run configuration of \(N=128\) compute nodes, which will complete one full simulation (100 timesteps). This configuration simulates about 13 billion particles, and each node has enough RAM to hold around 100 million particles (< 10 Gb). Based on linear regressions ran on the benchmark data, this will take
+\[
+  0.63693(1.1037\times 10^{-6}\cdot (16384)^2 + 0.03167)^{0.7717} \cdot \frac{1000}{3600} = 3.05\textrm{ hours}.
+\]
+As with the benchmark, we request 8 CPUs per task, and 2 tasks per node. In total, this also uses $390$ node hours.
 
 \end{document}
