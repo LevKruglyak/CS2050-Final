@@ -115,3 +115,24 @@ For some more examples, see the ```runs/``` folder.
     ```<avg total> <avg mass-assignment> <avg poisson-solve> <avg update>```
     
     All numbers are wall-clock milliseconds averaged over the full run.
+
+## Building and Running the APP
+
+To enable and launch the GUI frontend, you must build the `BUILD_APP` target in your CMake configuration. This links against the [Dear ImGui Bundle](https://github.com/pthom/imgui_bundle) — a comprehensive, cross‑platform suite of Dear ImGui widgets and utilities. 
+
+### Enabling the GUI Build  
+
+1. In your project root, reconfigure CMake with the `BUILD_APP` option set to `ON`:  
+   ```bash
+   cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_APP=ON
+   ```  
+2. Build both the CLI and APP executables:  
+   ```bash
+   cmake --build build -j
+   ```  
+
+### Running the APP  
+Once built, the GUI executable (by default named `lkxpm_app`) resides somewhere `build/` (this is platform specific). See the Dear ImGui Bundle documentation for more details. Note that the app must be run with at least 2 MPI processes (one process for the UI and one process for simulation). For instance, on my local device (MacBook Pro M3), the app can be run with:
+```bash
+mpirun -n 2 ./build/lkxpm_app.app/Contents/MacOS/lkxpm_app
+```  
