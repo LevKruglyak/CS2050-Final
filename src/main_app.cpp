@@ -567,6 +567,7 @@ int main(int argc, char** argv) {
       broadcast_command(Command::Shutdown);
       app = nullptr;
     };
+    params.iniFilename = "gui-default.ini";
 
     ImmApp::AddOnsParams addons;
     addons.withImplot = true;
