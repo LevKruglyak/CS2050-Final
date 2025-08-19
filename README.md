@@ -1,5 +1,7 @@
 # Large-Scale Gravity Simulator with MPI/OpenMP
 
+(Solo Final Project for CS2050 at Harvard)
+
 Large-scale cosmological simulations are an indispensable tool for cosmologists testing theories of structure formation. In the current standard model of cosmology, the universe begins almost perfectly uniformly, with tiny density perturbations seeded by inflationary expansion. In an expanding universe and under the influence of gravity, these small initial inhomogeneities are magnified into a large-scale web of galaxy clusters and voids. Such simulations are typically very computationally expensive, both from a compute and memory perspective, and so is an excellent candidate for massive parallelization.
 
 ![evolution](images/evolution.png)
